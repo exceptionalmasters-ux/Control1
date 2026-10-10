@@ -41,7 +41,7 @@ class MainActivity : AppCompatActivity() {
 
     private val discoverableLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode > 0) {
-            setStatus("Telefon jest widoczny przez ${result.resultCode} s. Teraz na telewizorze otwórz: Ustawienia → Piloty i akcesoria → Dodaj akcesorium, a następnie wybierz „Pilot Android TV”.")
+            setStatus("Telefon jest widoczny przez ${result.resultCode} s. Na telewizorze wybierz: Ustawienia → Piloty i akcesoria → Dodaj akcesorium. Szukaj „Pilot Android TV” albo nazwy telefonu.")
         } else setStatus("Widoczność Bluetooth nie została włączona")
     }
 
@@ -160,7 +160,7 @@ class MainActivity : AppCompatActivity() {
     private fun registerHidApp() {
         val sdp = BluetoothHidDeviceAppSdpSettings(
             "Pilot Android TV", "Klawiatura i pilot Bluetooth", "Prototyp",
-            BluetoothHidDevice.SUBCLASS1_COMBO, HidKeyboard.REPORT_DESCRIPTOR
+            BluetoothHidDevice.SUBCLASS1_KEYBOARD, HidKeyboard.REPORT_DESCRIPTOR
         )
         val ok = hidDevice?.registerApp(sdp, null, null, Executors.newSingleThreadExecutor(), hidCallback) == true
         if (!ok) setStatus("Nie udało się zarejestrować profilu HID")
@@ -190,7 +190,7 @@ class MainActivity : AppCompatActivity() {
         setStatus("Wysyłanie żądania połączenia HID do ${safeName(target)}…")
         val accepted = hid.connect(target)
         if (!accepted) {
-            setStatus("Telefon nie może rozpocząć połączenia sam. Kliknij „Parowanie”, a potem na telewizorze wybierz „Dodaj akcesorium” i połącz z „Pilot Android TV”. Aplikację pozostaw otwartą.")
+            setStatus("Telefon nie może rozpocząć połączenia sam. Kliknij „Parowanie”, a na telewizorze wybierz „Dodaj akcesorium”. Urządzenie może mieć nazwę „Pilot Android TV” albo nazwę telefonu. Aplikację pozostaw otwartą.")
             return
         }
 
