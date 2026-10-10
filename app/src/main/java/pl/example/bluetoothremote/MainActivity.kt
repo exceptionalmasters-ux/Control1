@@ -10,6 +10,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -27,6 +29,8 @@ class MainActivity : AppCompatActivity() {
     private var selectedDevice: BluetoothDevice? = null
     private var keyboard: HidKeyboard? = null
     private var bondedDevices = emptyList<BluetoothDevice>()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var connectionAttempt = 0
 
     private lateinit var status: TextView
     private lateinit var spinner: Spinner
@@ -66,9 +70,10 @@ class MainActivity : AppCompatActivity() {
                         setStatus("Połączono z ${safeName(device)}")
                     }
                     BluetoothProfile.STATE_CONNECTING -> setStatus("Łączenie z ${safeName(device)}…")
-                    else -> {
+                    BluetoothProfile.STATE_DISCONNECTING -> setStatus("Rozłączanie z ${safeName(device)}…")
+                    BluetoothProfile.STATE_DISCONNECTED -> {
                         if (selectedDevice == device) keyboard = null
-                        setStatus("Rozłączono")
+                        setStatus("Telewizor odrzucił lub zakończył połączenie HID. Usuń parowanie po obu stronach i sparuj urządzenia ponownie przy otwartej aplikacji.")
                     }
                 }
             }
@@ -153,8 +158,31 @@ class MainActivity : AppCompatActivity() {
     private fun connectSelected() {
         if (bondedDevices.isEmpty()) return setStatus("Najpierw sparuj telewizor w ustawieniach Bluetooth")
         selectedDevice = bondedDevices[spinner.selectedItemPosition]
-        val sent = hidDevice?.connect(selectedDevice) == true
-        if (!sent) setStatus("Nie udało się rozpocząć połączenia HID")
+        val hid = hidDevice ?: return setStatus("Profil HID nie jest jeszcze gotowy. Zamknij i uruchom aplikację ponownie.")
+        val target = selectedDevice ?: return setStatus("Nie wybrano telewizora")
+
+        if (hid.getConnectionState(target) == BluetoothProfile.STATE_CONNECTED) {
+            keyboard = HidKeyboard(hid, target)
+            return setStatus("Telewizor jest już połączony: ${safeName(target)}")
+        }
+
+        connectionAttempt++
+        val attempt = connectionAttempt
+        setStatus("Wysyłanie żądania połączenia HID do ${safeName(target)}…")
+        val accepted = hid.connect(target)
+        if (!accepted) {
+            setStatus("Android nie przyjął żądania HID. Usuń parowanie telefonu z telewizora, sparuj ponownie przy otwartej aplikacji i spróbuj jeszcze raz.")
+            return
+        }
+
+        setStatus("Żądanie wysłane do ${safeName(target)}. Zaakceptuj ewentualny komunikat na telewizorze…")
+        mainHandler.postDelayed({
+            if (attempt != connectionAttempt || keyboard != null) return@postDelayed
+            val state = hid.getConnectionState(target)
+            if (state != BluetoothProfile.STATE_CONNECTED) {
+                setStatus("Brak odpowiedzi telewizora (stan: ${stateName(state)}). Usuń parowanie po obu stronach, otwórz tę aplikację i dopiero wtedy sparuj urządzenia ponownie.")
+            }
+        }, 12_000)
     }
 
     private fun keyboardButton(id: Int, keyCode: Int) {
@@ -170,5 +198,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun safeName(device: BluetoothDevice): String = try { device.name ?: "Urządzenie Bluetooth" } catch (_: SecurityException) { "Urządzenie Bluetooth" }
+    private fun stateName(state: Int): String = when (state) {
+        BluetoothProfile.STATE_CONNECTED -> "połączono"
+        BluetoothProfile.STATE_CONNECTING -> "łączenie"
+        BluetoothProfile.STATE_DISCONNECTING -> "rozłączanie"
+        else -> "rozłączono"
+    }
     private fun setStatus(message: String) { status.text = message }
 }
