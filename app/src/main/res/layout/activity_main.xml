@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Pilot Bluetooth"
+            android:textAppearance="?attr/textAppearanceHeadlineMedium"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Uruchamianie Bluetooth…" />
+
+        <Spinner
+            android:id="@+id/deviceSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="12dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/connectButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Połącz" />
+
+            <Button
+                android:id="@+id/settingsButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Parowanie" />
+        </LinearLayout>
+
+        <GridLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:columnCount="3"
+            android:rowCount="3">
+
+            <Space android:layout_width="0dp" android:layout_height="64dp" android:layout_columnWeight="1" />
+            <Button android:id="@+id/upButton" android:layout_width="0dp" android:layout_height="64dp" android:layout_columnWeight="1" android:text="▲" />
+            <Space android:layout_width="0dp" android:layout_height="64dp" android:layout_columnWeight="1" />
+            <Button android:id="@+id/leftButton" android:layout_width="0dp" android:layout_height="64dp" android:layout_columnWeight="1" android:text="◀" />
+            <Button android:id="@+id/okButton" android:layout_width="0dp" android:layout_height="64dp" android:layout_columnWeight="1" android:text="OK" />
+            <Button android:id="@+id/rightButton" android:layout_width="0dp" android:layout_height="64dp" android:layout_columnWeight="1" android:text="▶" />
+            <Button android:id="@+id/backButton" android:layout_width="0dp" android:layout_height="64dp" android:layout_columnWeight="1" android:text="Wstecz" />
+            <Button android:id="@+id/downButton" android:layout_width="0dp" android:layout_height="64dp" android:layout_columnWeight="1" android:text="▼" />
+            <Button android:id="@+id/homeButton" android:layout_width="0dp" android:layout_height="64dp" android:layout_columnWeight="1" android:text="Home" />
+        </GridLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:orientation="horizontal">
+            <Button android:id="@+id/volumeDownButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Vol −" />
+            <Button android:id="@+id/playPauseButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginHorizontal="6dp" android:layout_weight="1" android:text="▶ ❚❚" />
+            <Button android:id="@+id/volumeUpButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Vol +" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/textInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:hint="Tekst do wpisania na telewizorze"
+            android:inputType="textMultiLine"
+            android:minLines="2" />
+
+        <Button
+            android:id="@+id/sendTextButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Wyślij tekst" />
+    </LinearLayout>
+</ScrollView>
