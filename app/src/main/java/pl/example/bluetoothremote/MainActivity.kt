@@ -12,7 +12,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -35,8 +34,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var spinner: Spinner
 
-    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-        if (it) startHid() else setStatus("Brak zgody na połączenia Bluetooth")
+    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        if (grants.values.all { it }) startHid()
+        else setStatus("Potrzebna jest zgoda na połączenia i udostępnianie przez Bluetooth")
+    }
+
+    private val discoverableLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode > 0) {
+            setStatus("Telefon jest widoczny przez ${result.resultCode} s. Teraz na telewizorze otwórz: Ustawienia → Piloty i akcesoria → Dodaj akcesorium, a następnie wybierz „Pilot Android TV”.")
+        } else setStatus("Widoczność Bluetooth nie została włączona")
     }
 
     private val profileListener = object : BluetoothProfile.ServiceListener {
@@ -86,9 +92,7 @@ class MainActivity : AppCompatActivity() {
         status = findViewById(R.id.statusText)
         spinner = findViewById(R.id.deviceSpinner)
 
-        findViewById<Button>(R.id.settingsButton).setOnClickListener {
-            startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-        }
+        findViewById<Button>(R.id.settingsButton).setOnClickListener { makeDiscoverable() }
         findViewById<Button>(R.id.connectButton).setOnClickListener { connectSelected() }
         keyboardButton(R.id.upButton, 0x52)
         keyboardButton(R.id.downButton, 0x51)
@@ -123,12 +127,27 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensurePermissionAndStart() {
         if (Build.VERSION.SDK_INT >= 31 && !hasBluetoothPermission()) {
-            permissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+            permissionLauncher.launch(arrayOf(
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_ADVERTISE
+            ))
         } else startHid()
     }
 
     private fun hasBluetoothPermission(): Boolean = Build.VERSION.SDK_INT < 31 ||
-        ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED)
+
+    private fun makeDiscoverable() {
+        if (!hasBluetoothPermission()) {
+            ensurePermissionAndStart()
+            return
+        }
+        val intent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
+            putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+        }
+        discoverableLauncher.launch(intent)
+    }
 
     private fun startHid() {
         val adapter = bluetoothAdapter
@@ -171,7 +190,7 @@ class MainActivity : AppCompatActivity() {
         setStatus("Wysyłanie żądania połączenia HID do ${safeName(target)}…")
         val accepted = hid.connect(target)
         if (!accepted) {
-            setStatus("Android nie przyjął żądania HID. Usuń parowanie telefonu z telewizora, sparuj ponownie przy otwartej aplikacji i spróbuj jeszcze raz.")
+            setStatus("Telefon nie może rozpocząć połączenia sam. Kliknij „Parowanie”, a potem na telewizorze wybierz „Dodaj akcesorium” i połącz z „Pilot Android TV”. Aplikację pozostaw otwartą.")
             return
         }
 
