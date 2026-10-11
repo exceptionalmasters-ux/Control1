@@ -19,6 +19,12 @@ android {
         versionCode = 2
         versionName = "0.2.0"
     }
+
+    packaging {
+        resources {
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+        }
+    }
 }
 
 dependencies {
