@@ -68,9 +68,22 @@ private fun tls(host:String,port:Int,id:Identity,readTimeout:Int):SecureConnecti
 
 class TvPairing(context:Context,private val host:String):Closeable{
     private val id=IdentityStore.get(context);private var connection:SecureConnection?=null
-    fun start(name:String):Result<Unit>=runCatching{val c=tls(host,6467,id,10000);connection=c;val input=c.socket.inputStream;val output=c.socket.outputStream;output.frame(outer{message(10){string(1,"Control1");string(2,name)}});while(true){val m=parse(input.frame());status(m);when{m.has(11)->output.frame(outer{message(20){message(1){number(1,3);number(2,6)};number(3,1)}});m.has(20)->output.frame(outer{message(30){message(1){number(1,3);number(2,6)};number(2,1)}});m.has(31)->return@runCatching;else->error("Nieoczekiwana odpowiedź podczas parowania")}}}.onFailure{close()}
+    fun start(name:String): Result<Unit> = runCatching{val c=tls(host,6467,id,10000);connection=c;val input=c.socket.inputStream;val output=c.socket.outputStream;output.frame(outer{message(10){string(1,"Control1");string(2,name)}});while(true){val m=parse(input.frame());status(m);when{m.has(11)->output.frame(outer{message(20){message(1){number(1,3);number(2,6)};number(3,1)}});m.has(20)->output.frame(outer{message(30){message(1){number(1,3);number(2,6)};number(2,1)}});m.has(31)->return@runCatching;else->error("Nieoczekiwana odpowiedź podczas parowania")}}}.onFailure{close()}
     fun complete(raw:String):Result<Unit>{val code=raw.trim().uppercase();val digest=runCatching{digest(code)}.getOrElse{return Result.failure(it)};return runCatching{val c=connection?:error("Sesja parowania wygasła");c.socket.outputStream.frame(outer{message(40){bytes(1,digest)}});val reply=parse(c.socket.inputStream.frame());status(reply);if(!reply.has(41))error("TV odrzucił kod")}.also{close()}}
-    private fun digest(code:String):ByteArray{require(code.length==6&&code.all{it.isDigit()||it in 'A'..'F'}){"Kod musi mieć 6 znaków 0-9/A-F"};val c=connection?:error("Sesja wygasła");val client=id.cert.publicKey as RSAPublicKey;val server=c.peer.publicKey as RSAPublicKey;fun BigInteger.raw()=toByteArray().let{if(it.size>1&&it[0]==0.toByte())it.copyOfRange(1,it.size)else it};val d=MessageDigest.getInstance("SHA-256").apply{update(client.modulus.raw());update(client.publicExponent.raw());update(server.modulus.raw());update(server.publicExponent.raw());update(byteArrayOf(code.substring(2,4).toInt(16).toByte(),code.substring(4,6).toInt(16).toByte()))}.digest();require((d[0].toInt() and 255)==code.substring(0,2).toInt(16)){"Kod nie pasuje do tego telewizora"};return d}
+    private fun digest(code:String):ByteArray {
+        require(code.length == 6 && code.all { it.isDigit() || it in 'A'..'F' }) { "Kod musi mieć 6 znaków 0-9/A-F" }
+        val c = connection ?: error("Sesja wygasła")
+        val client = id.cert.publicKey as RSAPublicKey
+        val server = c.peer.publicKey as RSAPublicKey
+        fun BigInteger.raw() = toByteArray().let { if (it.size > 1 && it[0] == 0.toByte()) it.copyOfRange(1, it.size) else it }
+        val d = MessageDigest.getInstance("SHA-256").apply {
+            update(client.modulus.raw()); update(client.publicExponent.raw())
+            update(server.modulus.raw()); update(server.publicExponent.raw())
+            update(byteArrayOf(code.substring(2,4).toInt(16).toByte(), code.substring(4,6).toInt(16).toByte()))
+        }.digest()
+        require((d[0].toInt() and 255) == code.substring(0,2).toInt(16)) { "Kod nie pasuje do tego telewizora" }
+        return d
+    }
     private fun status(m:Map<Int,List<PVal>>){val s=m.num(2)?:200;if(s!=200L)error("TV odrzucił parowanie (kod $s)")}
     private fun outer(build:PWriter.()->Unit)=PWriter().number(1,2).number(2,200).apply(build).data()
     override fun close(){runCatching{connection?.socket?.close()};connection=null}
@@ -78,7 +91,7 @@ class TvPairing(context:Context,private val host:String):Closeable{
 
 class TvRemote(context:Context,private val host:String,private val event:(String)->Unit):Closeable{
     private val id=IdentityStore.get(context);private var connection:SecureConnection?=null;private var output:OutputStream?=null;private var scope:CoroutineScope?=null;private val writer=Executors.newSingleThreadExecutor();@Volatile private var ready=false;@Volatile private var ime=0;@Volatile private var field=0;private var features=0
-    fun connect():Result<Unit>=runCatching{val c=tls(host,6466,id,10000);connection=c;output=c.socket.outputStream;val input=c.socket.inputStream;while(!ready)handle(parse(input.frame()));c.socket.soTimeout=0;scope=CoroutineScope(SupervisorJob()+Dispatchers.IO).also{it.launch{runCatching{while(true)handle(parse(input.frame()))}.onFailure{if(ready){ready=false;event("Utracono połączenie z TV")}}}}}.onFailure{close()}
+    fun connect(): Result<Unit> = runCatching{val c=tls(host,6466,id,10000);connection=c;output=c.socket.outputStream;val input=c.socket.inputStream;while(!ready)handle(parse(input.frame()));c.socket.soTimeout=0;scope=CoroutineScope(SupervisorJob()+Dispatchers.IO).also{it.launch{runCatching{while(true)handle(parse(input.frame()))}.onFailure{if(ready){ready=false;event("Utracono połączenie z TV")}}}}}.onFailure{close()}
     private fun handle(m:Map<Int,List<PVal>>){when{m.has(1)->{features=(m.msg(1)?.num(1)?.toInt()?:0) and 615;send{message(1){number(1,features);message(2){string(1,android.os.Build.MODEL);string(2,android.os.Build.MANUFACTURER);number(3,1);string(4,"1");string(5,"pl.example.bluetoothremote");string(6,"0.2")}}}};m.has(2)->send{message(2){number(1,features)}};m.has(8)->send{message(9){number(1,m.msg(8)?.num(1)?:0)}};m.has(21)->{ime=m.msg(21)?.num(1)?.toInt()?:ime;field=m.msg(21)?.num(2)?.toInt()?:field};m.has(40)->ready=true}}
     fun sendKey(key:Int):Boolean{if(!ready)return false;send{message(10){number(1,key);number(2,3)}};return true}
     fun sendText(text:String):Boolean{if(!ready||text.isEmpty())return false;val caret=text.length;send{message(21){number(1,ime);number(2,field);message(3){number(1,1);message(2){number(1,caret);number(2,caret);string(3,text)}}}};return true}
