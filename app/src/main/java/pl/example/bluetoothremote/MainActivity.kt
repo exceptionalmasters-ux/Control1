@@ -2,7 +2,6 @@ package pl.example.bluetoothremote
 
 import android.os.Bundle
 import android.view.View
-import android.view.MotionEvent
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -40,8 +39,6 @@ class MainActivity : AppCompatActivity() {
         key(R.id.homeButton, TvKey.HOME); key(R.id.volumeDownButton, TvKey.VOL_DOWN)
         key(R.id.volumeUpButton, TvKey.VOL_UP); key(R.id.playPauseButton, TvKey.PLAY_PAUSE)
         key(R.id.powerButton, TvKey.POWER)
-        holdKey(R.id.upButton, TvKey.UP); holdKey(R.id.downButton, TvKey.DOWN)
-        holdKey(R.id.leftButton, TvKey.LEFT); holdKey(R.id.rightButton, TvKey.RIGHT)
         findViewById<TouchpadView>(R.id.touchpad).listener = object : TouchpadView.Listener {
             override fun move(key: Int, repeats: Int) {
                 val client = remote ?: return show("Najpierw połącz telewizor")
@@ -77,7 +74,9 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) { session.complete(code.text.toString()) }
             busy(false); result.onSuccess {
-                pairing = null; saveHost(); show("Sparowano. Łączenie pilota…"); connect()
+                pairing = null
+                getSharedPreferences("tv", MODE_PRIVATE).edit().putBoolean("paired", true).apply()
+                saveHost(); show("Sparowano. Łączenie pilota…"); connect()
             }.onFailure { show(errorText(it)) }
         }
     }
@@ -85,7 +84,9 @@ class MainActivity : AppCompatActivity() {
         if (address().isEmpty()) return show("Wpisz adres IP telewizora")
         remote?.close(); remote = null; show("Łączenie z telewizorem…")
         lifecycleScope.launch {
-            val client = TvRemote(this@MainActivity, address()) { runOnUiThread { show(it) } }
+            val client = TvRemote(this@MainActivity, address()) {
+                runOnUiThread { remote = null; show("$it — po powrocie połączę ponownie") }
+            }
             val result = withContext(Dispatchers.IO) { client.connect() }
             result.onSuccess {
                 remote = client; saveHost(); setupPanel.visibility = View.GONE
@@ -98,15 +99,6 @@ class MainActivity : AppCompatActivity() {
     private fun key(id: Int, value: Int) = findViewById<Button>(id).setOnClickListener {
         if (remote?.sendKey(value) != true) show("Najpierw połącz telewizor")
     }
-    private fun holdKey(id: Int, value: Int) {
-        findViewById<Button>(id).setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> remote?.sendKey(value, 1)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> remote?.sendKey(value, 2)
-            }
-            false
-        }
-    }
     private fun busy(value: Boolean) { pairButton.isEnabled = !value; confirmButton.isEnabled = !value }
     private fun show(message: String) { status.text = message }
     private fun errorText(t: Throwable): String = when {
@@ -115,4 +107,10 @@ class MainActivity : AppCompatActivity() {
         else -> "Błąd: ${t.message ?: "nie udało się połączyć"}"
     }
     override fun onDestroy() { pairing?.close(); remote?.close(); super.onDestroy() }
+
+    override fun onResume() {
+        super.onResume()
+        if (::host.isInitialized && remote == null && host.text.isNotBlank() &&
+            getSharedPreferences("tv", MODE_PRIVATE).getBoolean("paired", false)) connect()
+    }
 }
