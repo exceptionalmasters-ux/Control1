@@ -45,8 +45,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<TouchpadView>(R.id.touchpad).listener = object : TouchpadView.Listener {
             override fun move(key: Int, repeats: Int) {
                 val client = remote ?: return show("Najpierw połącz telewizor")
-                repeat(repeats.coerceAtMost(12)) { client.sendKey(key) }
+                client.sendKey(key, 1)
             }
+            override fun stop(key: Int) { remote?.sendKey(key, 2) }
             override fun click() { remote?.sendKey(TvKey.OK) ?: show("Najpierw połącz telewizor") }
         }
         findViewById<Button>(R.id.sendTextButton).setOnClickListener {

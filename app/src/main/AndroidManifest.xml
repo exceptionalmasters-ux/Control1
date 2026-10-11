@@ -6,7 +6,9 @@
 
     <application
         android:allowBackup="true"
-        android:label="Pilot Android TV"
+        android:icon="@drawable/ic_control_one"
+        android:roundIcon="@drawable/ic_control_one"
+        android:label="Control One"
         android:supportsRtl="true"
         android:theme="@style/Theme.BluetoothRemote">
         <activity
