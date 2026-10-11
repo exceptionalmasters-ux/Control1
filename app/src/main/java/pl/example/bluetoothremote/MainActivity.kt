@@ -1,227 +1,91 @@
 package pl.example.bluetoothremote
 
-import android.Manifest
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothHidDevice
-import android.bluetooth.BluetoothHidDeviceAppSdpSettings
-import android.bluetooth.BluetoothProfile
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.widget.ArrayAdapter
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
-import android.widget.Spinner
 import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import java.util.concurrent.Executors
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
-    private val bluetoothAdapter: BluetoothAdapter? by lazy { BluetoothAdapter.getDefaultAdapter() }
-    private var hidDevice: BluetoothHidDevice? = null
-    private var selectedDevice: BluetoothDevice? = null
-    private var keyboard: HidKeyboard? = null
-    private var bondedDevices = emptyList<BluetoothDevice>()
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private var connectionAttempt = 0
-
     private lateinit var status: TextView
-    private lateinit var spinner: Spinner
-
-    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-        if (grants.values.all { it }) startHid()
-        else setStatus("Potrzebna jest zgoda na połączenia i udostępnianie przez Bluetooth")
-    }
-
-    private val discoverableLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode > 0) {
-            setStatus("Telefon jest widoczny przez ${result.resultCode} s. Na telewizorze wybierz: Ustawienia → Piloty i akcesoria → Dodaj akcesorium. Szukaj „Pilot Android TV” albo nazwy telefonu.")
-        } else setStatus("Widoczność Bluetooth nie została włączona")
-    }
-
-    private val profileListener = object : BluetoothProfile.ServiceListener {
-        override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-            hidDevice = proxy as BluetoothHidDevice
-            registerHidApp()
-        }
-        override fun onServiceDisconnected(profile: Int) {
-            hidDevice = null
-            keyboard = null
-            setStatus("Usługa Bluetooth została rozłączona")
-        }
-    }
-
-    private val hidCallback = object : BluetoothHidDevice.Callback() {
-        override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
-            runOnUiThread {
-                if (registered) {
-                    refreshDevices()
-                    setStatus("Gotowy — wybierz sparowany telewizor")
-                } else setStatus("Telefon nie udostępnił profilu pilota HID")
-            }
-        }
-
-        override fun onConnectionStateChanged(device: BluetoothDevice, state: Int) {
-            runOnUiThread {
-                when (state) {
-                    BluetoothProfile.STATE_CONNECTED -> {
-                        selectedDevice = device
-                        keyboard = hidDevice?.let { HidKeyboard(it, device) }
-                        setStatus("Połączono z ${safeName(device)}")
-                    }
-                    BluetoothProfile.STATE_CONNECTING -> setStatus("Łączenie z ${safeName(device)}…")
-                    BluetoothProfile.STATE_DISCONNECTING -> setStatus("Rozłączanie z ${safeName(device)}…")
-                    BluetoothProfile.STATE_DISCONNECTED -> {
-                        if (selectedDevice == device) keyboard = null
-                        setStatus("Telewizor odrzucił lub zakończył połączenie HID. Usuń parowanie po obu stronach i sparuj urządzenia ponownie przy otwartej aplikacji.")
-                    }
-                }
-            }
-        }
-    }
+    private lateinit var host: EditText
+    private lateinit var code: EditText
+    private lateinit var pairButton: Button
+    private lateinit var confirmButton: Button
+    private var pairing: TvPairing? = null
+    private var remote: TvRemote? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-        status = findViewById(R.id.statusText)
-        spinner = findViewById(R.id.deviceSpinner)
-
-        findViewById<Button>(R.id.settingsButton).setOnClickListener { makeDiscoverable() }
-        findViewById<Button>(R.id.connectButton).setOnClickListener { connectSelected() }
-        keyboardButton(R.id.upButton, 0x52)
-        keyboardButton(R.id.downButton, 0x51)
-        keyboardButton(R.id.leftButton, 0x50)
-        keyboardButton(R.id.rightButton, 0x4F)
-        keyboardButton(R.id.okButton, 0x28)
-        consumerButton(R.id.backButton, 0x0224)
-        consumerButton(R.id.homeButton, 0x0223)
-        consumerButton(R.id.volumeDownButton, 0x00EA)
-        consumerButton(R.id.volumeUpButton, 0x00E9)
-        consumerButton(R.id.playPauseButton, 0x00CD)
+        super.onCreate(savedInstanceState); setContentView(R.layout.activity_main)
+        status = findViewById(R.id.statusText); host = findViewById(R.id.hostInput)
+        code = findViewById(R.id.codeInput); pairButton = findViewById(R.id.pairButton)
+        confirmButton = findViewById(R.id.confirmButton)
+        host.setText(getSharedPreferences("tv", MODE_PRIVATE).getString("host", ""))
+        pairButton.setOnClickListener { startPairing() }
+        confirmButton.setOnClickListener { finishPairing() }
+        findViewById<Button>(R.id.connectButton).setOnClickListener { connect() }
+        key(R.id.upButton, TvKey.UP); key(R.id.downButton, TvKey.DOWN)
+        key(R.id.leftButton, TvKey.LEFT); key(R.id.rightButton, TvKey.RIGHT)
+        key(R.id.okButton, TvKey.OK); key(R.id.backButton, TvKey.BACK)
+        key(R.id.homeButton, TvKey.HOME); key(R.id.volumeDownButton, TvKey.VOL_DOWN)
+        key(R.id.volumeUpButton, TvKey.VOL_UP); key(R.id.playPauseButton, TvKey.PLAY_PAUSE)
+        key(R.id.powerButton, TvKey.POWER)
         findViewById<Button>(R.id.sendTextButton).setOnClickListener {
-            val text = findViewById<EditText>(R.id.textInput).text.toString()
-            val skipped = keyboard?.text(text)
-            if (skipped == null) setStatus("Najpierw połącz telewizor")
-            else if (skipped > 0) setStatus("Wysłano tekst; pominięto $skipped nieobsługiwanych znaków")
-            else setStatus("Wysłano tekst")
+            val value = findViewById<EditText>(R.id.textInput).text.toString()
+            if (remote?.sendText(value) == true) show("Wysłano tekst")
+            else show("Najpierw połącz TV i ustaw na nim kursor w polu tekstowym")
         }
-        ensurePermissionAndStart()
+        show("Telefon i TV muszą być w tej samej sieci Wi‑Fi. Wpisz adres IP telewizora.")
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (hasBluetoothPermission()) refreshDevices()
-    }
-
-    override fun onDestroy() {
-        hidDevice?.unregisterApp()
-        hidDevice?.let { bluetoothAdapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, it) }
-        super.onDestroy()
-    }
-
-    private fun ensurePermissionAndStart() {
-        if (Build.VERSION.SDK_INT >= 31 && !hasBluetoothPermission()) {
-            permissionLauncher.launch(arrayOf(
-                Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.BLUETOOTH_ADVERTISE
-            ))
-        } else startHid()
-    }
-
-    private fun hasBluetoothPermission(): Boolean = Build.VERSION.SDK_INT < 31 ||
-        (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED)
-
-    private fun makeDiscoverable() {
-        if (!hasBluetoothPermission()) {
-            ensurePermissionAndStart()
-            return
-        }
-        val intent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
-            putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
-        }
-        discoverableLauncher.launch(intent)
-    }
-
-    private fun startHid() {
-        val adapter = bluetoothAdapter
-        if (adapter == null) return setStatus("Ten telefon nie obsługuje Bluetooth")
-        if (!adapter.isEnabled) return setStatus("Włącz Bluetooth i wróć do aplikacji")
-        val requested = adapter.getProfileProxy(this, profileListener, BluetoothProfile.HID_DEVICE)
-        if (!requested) setStatus("Telefon nie udostępnia profilu Bluetooth HID Device")
-    }
-
-    private fun registerHidApp() {
-        val sdp = BluetoothHidDeviceAppSdpSettings(
-            "Pilot Android TV", "Klawiatura i pilot Bluetooth", "Prototyp",
-            BluetoothHidDevice.SUBCLASS1_KEYBOARD, HidKeyboard.REPORT_DESCRIPTOR
-        )
-        val ok = hidDevice?.registerApp(sdp, null, null, Executors.newSingleThreadExecutor(), hidCallback) == true
-        if (!ok) setStatus("Nie udało się zarejestrować profilu HID")
-    }
-
-    private fun refreshDevices() {
-        if (!hasBluetoothPermission()) return
-        bondedDevices = bluetoothAdapter?.bondedDevices?.sortedBy { safeName(it) } ?: emptyList()
-        val names = bondedDevices.map { "${safeName(it)}  •  ${it.address}" }
-        spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
-            if (names.isEmpty()) listOf("Brak sparowanych urządzeń") else names)
-    }
-
-    private fun connectSelected() {
-        if (bondedDevices.isEmpty()) return setStatus("Najpierw sparuj telewizor w ustawieniach Bluetooth")
-        selectedDevice = bondedDevices[spinner.selectedItemPosition]
-        val hid = hidDevice ?: return setStatus("Profil HID nie jest jeszcze gotowy. Zamknij i uruchom aplikację ponownie.")
-        val target = selectedDevice ?: return setStatus("Nie wybrano telewizora")
-
-        if (hid.getConnectionState(target) == BluetoothProfile.STATE_CONNECTED) {
-            keyboard = HidKeyboard(hid, target)
-            return setStatus("Telewizor jest już połączony: ${safeName(target)}")
-        }
-
-        connectionAttempt++
-        val attempt = connectionAttempt
-        setStatus("Wysyłanie żądania połączenia HID do ${safeName(target)}…")
-        val accepted = hid.connect(target)
-        if (!accepted) {
-            setStatus("Telefon nie może rozpocząć połączenia sam. Kliknij „Parowanie”, a na telewizorze wybierz „Dodaj akcesorium”. Urządzenie może mieć nazwę „Pilot Android TV” albo nazwę telefonu. Aplikację pozostaw otwartą.")
-            return
-        }
-
-        setStatus("Żądanie wysłane do ${safeName(target)}. Zaakceptuj ewentualny komunikat na telewizorze…")
-        mainHandler.postDelayed({
-            if (attempt != connectionAttempt || keyboard != null) return@postDelayed
-            val state = hid.getConnectionState(target)
-            if (state != BluetoothProfile.STATE_CONNECTED) {
-                setStatus("Brak odpowiedzi telewizora (stan: ${stateName(state)}). Usuń parowanie po obu stronach, otwórz tę aplikację i dopiero wtedy sparuj urządzenia ponownie.")
-            }
-        }, 12_000)
-    }
-
-    private fun keyboardButton(id: Int, keyCode: Int) {
-        findViewById<Button>(id).setOnClickListener {
-            keyboard?.key(keyCode) ?: setStatus("Najpierw połącz telewizor")
+    private fun address() = host.text.toString().trim()
+    private fun startPairing() {
+        if (address().isEmpty()) return show("Wpisz adres IP telewizora, np. 192.168.1.50")
+        busy(true); show("Łączenie z usługą parowania TV…")
+        lifecycleScope.launch {
+            val session = TvPairing(this@MainActivity, address())
+            val result = withContext(Dispatchers.IO) { session.start(android.os.Build.MODEL) }
+            busy(false); result.onSuccess {
+                pairing = session; code.visibility = View.VISIBLE; confirmButton.visibility = View.VISIBLE
+                show("Przepisz 6-znakowy kod wyświetlony na telewizorze.")
+            }.onFailure { show(errorText(it)) }
         }
     }
-
-    private fun consumerButton(id: Int, usage: Int) {
-        findViewById<Button>(id).setOnClickListener {
-            keyboard?.consumer(usage) ?: setStatus("Najpierw połącz telewizor")
+    private fun finishPairing() {
+        val session = pairing ?: return show("Najpierw kliknij „Paruj z TV”")
+        busy(true); show("Sprawdzanie kodu…")
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { session.complete(code.text.toString()) }
+            busy(false); result.onSuccess {
+                pairing = null; saveHost(); show("Sparowano. Łączenie pilota…"); connect()
+            }.onFailure { show(errorText(it)) }
         }
     }
-
-    private fun safeName(device: BluetoothDevice): String = try { device.name ?: "Urządzenie Bluetooth" } catch (_: SecurityException) { "Urządzenie Bluetooth" }
-    private fun stateName(state: Int): String = when (state) {
-        BluetoothProfile.STATE_CONNECTED -> "połączono"
-        BluetoothProfile.STATE_CONNECTING -> "łączenie"
-        BluetoothProfile.STATE_DISCONNECTING -> "rozłączanie"
-        else -> "rozłączono"
+    private fun connect() {
+        if (address().isEmpty()) return show("Wpisz adres IP telewizora")
+        remote?.close(); remote = null; show("Łączenie z telewizorem…")
+        lifecycleScope.launch {
+            val client = TvRemote(this@MainActivity, address()) { runOnUiThread { show(it) } }
+            val result = withContext(Dispatchers.IO) { client.connect() }
+            result.onSuccess { remote = client; saveHost(); show("Połączono — pilot jest gotowy") }
+                .onFailure { client.close(); show(errorText(it)) }
+        }
     }
-    private fun setStatus(message: String) { status.text = message }
+    private fun saveHost() = getSharedPreferences("tv", MODE_PRIVATE).edit().putString("host", address()).apply()
+    private fun key(id: Int, value: Int) = findViewById<Button>(id).setOnClickListener {
+        if (remote?.sendKey(value) != true) show("Najpierw połącz telewizor")
+    }
+    private fun busy(value: Boolean) { pairButton.isEnabled = !value; confirmButton.isEnabled = !value }
+    private fun show(message: String) { status.text = message }
+    private fun errorText(t: Throwable): String = when {
+        t.message?.contains("refused", true) == true -> "TV odrzucił połączenie. Sprawdź IP i usługę Android TV Remote."
+        t.message?.contains("timed out", true) == true -> "Brak odpowiedzi. Sprawdź IP i wspólną sieć Wi‑Fi."
+        else -> "Błąd: ${t.message ?: "nie udało się połączyć"}"
+    }
+    override fun onDestroy() { pairing?.close(); remote?.close(); super.onDestroy() }
 }
