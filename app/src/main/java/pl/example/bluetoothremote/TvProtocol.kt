@@ -123,6 +123,11 @@ class TvRemote(context:Context,private val host:String,private val event:(String
         sendKey(TvKey.DEL,1)
         return true
     }
+    fun openUrl(url:String):Boolean {
+        if(!ready)return false
+        send{message(90){string(1,url)}}
+        return true
+    }
     private fun send(build:PWriter.()->Unit){val data=PWriter().apply(build).data();val stream=output?:return;runCatching{writer.execute{runCatching{stream.frame(data)}.onFailure{ready=false;event("Błąd wysyłania do TV")}}}}
     override fun close(){ready=false;scope?.cancel();scope=null;runCatching{connection?.socket?.close()};connection=null;output=null;writer.shutdownNow()}
 }
