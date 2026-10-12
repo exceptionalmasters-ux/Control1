@@ -30,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     private var shiftOn = false
     private val keyboardBuffer = StringBuilder()
     private val handler = Handler(Looper.getMainLooper())
+    private var lastKeyboardTapAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); setContentView(R.layout.activity_main)
@@ -52,8 +53,12 @@ class MainActivity : AppCompatActivity() {
         styledButtons.forEach { findViewById<Button>(it).backgroundTintList = null }
         setupKeyboard()
         findViewById<Button>(R.id.backspaceButton).setOnClickListener {
-            if(keyboardBuffer.isNotEmpty()){keyboardBuffer.deleteCharAt(keyboardBuffer.lastIndex);refreshKeyboardBuffer();if(keyboardBuffer.isNotEmpty())remote?.sendText(keyboardBuffer.toString())else remote?.backspace()}
-            else if(remote?.backspace()!=true)show("Najpierw połącz telewizor")
+            if (!acceptKeyboardTap()) return@setOnClickListener
+            if (remote?.backspace() != true) show("Najpierw połącz telewizor")
+            else if (keyboardBuffer.isNotEmpty()) {
+                keyboardBuffer.deleteCharAt(keyboardBuffer.length - 1)
+                refreshKeyboardBuffer()
+            }
         }
         findViewById<Button>(R.id.clearTextButton).setOnClickListener {
             val client=remote
@@ -106,7 +111,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun matchParentHeight()=LinearLayout.LayoutParams.MATCH_PARENT
-    private fun typeOnTv(char:Char){keyboardBuffer.append(char);refreshKeyboardBuffer();if(remote?.sendText(keyboardBuffer.toString())!=true)show("Najpierw połącz telewizor")}
+    private fun typeOnTv(char:Char){
+        if (!acceptKeyboardTap()) return
+        if(remote?.sendText(char.toString())!=true) show("Najpierw połącz telewizor")
+        else { keyboardBuffer.append(char);refreshKeyboardBuffer() }
+    }
+    private fun acceptKeyboardTap():Boolean {
+        val now=android.os.SystemClock.elapsedRealtime()
+        if(now-lastKeyboardTapAt<140L)return false
+        lastKeyboardTapAt=now
+        return true
+    }
     private fun refreshKeyboardBuffer(){findViewById<TextView>(R.id.keyboardBuffer).text=keyboardBuffer.toString().ifEmpty{"Wpisywany tekst pojawi się tutaj"}}
     private fun startPairing() {
         if (address().isEmpty()) return show("Wpisz adres IP telewizora, np. 192.168.1.50")
