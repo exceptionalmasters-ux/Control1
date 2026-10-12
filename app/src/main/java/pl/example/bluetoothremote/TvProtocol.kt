@@ -53,6 +53,7 @@ private fun parse(data:ByteArray):Map<Int,List<PVal>>{val result=mutableMapOf<In
 private fun Map<Int,List<PVal>>.has(f:Int)=containsKey(f)
 private fun Map<Int,List<PVal>>.num(f:Int)=((get(f)?.firstOrNull()) as? PVal.N)?.v
 private fun Map<Int,List<PVal>>.msg(f:Int)=((get(f)?.firstOrNull()) as? PVal.B)?.v?.let(::parse)
+private fun Map<Int,List<PVal>>.str(f:Int)=((get(f)?.firstOrNull()) as? PVal.B)?.v?.toString(Charsets.UTF_8)
 
 private data class Identity(val store:KeyStore,val cert:X509Certificate)
 private object IdentityStore {
@@ -89,10 +90,28 @@ class TvPairing(context:Context,private val host:String):Closeable{
     override fun close(){runCatching{connection?.socket?.close()};connection=null}
 }
 
-class TvRemote(context:Context,private val host:String,private val event:(String)->Unit):Closeable{
+data class ImeState(val appPackage:String,val value:String,val label:String,val cursorStart:Int,val cursorEnd:Int)
+
+class TvRemote(context:Context,private val host:String,private val imeEvent:(ImeState)->Unit={},private val event:(String)->Unit):Closeable{
     private val id=IdentityStore.get(context);private var connection:SecureConnection?=null;private var output:OutputStream?=null;private var scope:CoroutineScope?=null;private val writer=Executors.newSingleThreadExecutor();@Volatile private var ready=false;@Volatile private var ime=0;@Volatile private var field=0;private var features=0
     fun connect(): Result<Unit> = runCatching{val c=tls(host,6466,id,10000);connection=c;output=c.socket.outputStream;val input=c.socket.inputStream;while(!ready)handle(parse(input.frame()));c.socket.soTimeout=0;scope=CoroutineScope(SupervisorJob()+Dispatchers.IO).also{it.launch{runCatching{while(true)handle(parse(input.frame()))}.onFailure{if(ready){ready=false;event("Utracono połączenie z TV")}}}}}.onFailure{close()}
-    private fun handle(m:Map<Int,List<PVal>>){when{m.has(1)->{features=(m.msg(1)?.num(1)?.toInt()?:0) and 615;send{message(1){number(1,features);message(2){string(1,android.os.Build.MODEL);string(2,android.os.Build.MANUFACTURER);number(3,1);string(4,"1");string(5,"pl.example.bluetoothremote");string(6,"0.2")}}}};m.has(2)->send{message(2){number(1,features)}};m.has(8)->send{message(9){number(1,m.msg(8)?.num(1)?:0)}};m.has(21)->{ime=m.msg(21)?.num(1)?.toInt()?:ime;field=m.msg(21)?.num(2)?.toInt()?:field};m.has(40)->ready=true}}
+    private fun handle(m:Map<Int,List<PVal>>){when{
+        m.has(1)->{features=(m.msg(1)?.num(1)?.toInt()?:0) and 615;send{message(1){number(1,features);message(2){string(1,android.os.Build.MODEL);string(2,android.os.Build.MANUFACTURER);number(3,1);string(4,"1");string(5,"pl.example.bluetoothremote");string(6,"0.13")}}}}
+        m.has(2)->send{message(2){number(1,features)}}
+        m.has(8)->send{message(9){number(1,m.msg(8)?.num(1)?:0)}}
+        m.has(20)->{
+            val message=m.msg(20);val app=message?.msg(1);val status=message?.msg(2)
+            ime=app?.num(1)?.toInt()?:ime;field=status?.num(1)?.toInt()?:field
+            publishIme(app?.str(12).orEmpty(),status)
+        }
+        m.has(21)->{ime=m.msg(21)?.num(1)?.toInt()?:ime;field=m.msg(21)?.num(2)?.toInt()?:field}
+        m.has(22)->{val status=m.msg(22)?.msg(2);field=status?.num(1)?.toInt()?:field;publishIme("",status)}
+        m.has(40)->ready=true
+    }}
+    private fun publishIme(app:String,status:Map<Int,List<PVal>>?){
+        val state=ImeState(app,status?.str(2).orEmpty(),status?.str(6).orEmpty(),status?.num(3)?.toInt()?:0,status?.num(4)?.toInt()?:0)
+        imeEvent(state)
+    }
     fun sendKey(key:Int, direction:Int = 3):Boolean{if(!ready)return false;send{message(10){number(1,key);number(2,direction)}};return true}
     fun sendText(text:String):Boolean{if(!ready||text.isEmpty())return false;val caret=(text.length-1).coerceAtLeast(0);send{message(21){number(1,ime);number(2,field);message(3){number(1,1);message(2){number(1,caret);number(2,caret);string(3,text)}}}};return true}
     fun sendTextAsKeys(text:String):Int {

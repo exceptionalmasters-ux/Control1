@@ -174,7 +174,12 @@ class MainActivity : AppCompatActivity() {
         if (address().isEmpty()) return show("Wpisz adres IP telewizora")
         remote?.close(); remote = null; show("Łączenie z telewizorem…")
         lifecycleScope.launch {
-            val client = TvRemote(this@MainActivity, address()) {
+            val client = TvRemote(this@MainActivity, address(), imeEvent={ imeState ->
+                runOnUiThread {
+                    val source=imeState.label.ifBlank { imeState.appPackage.substringAfterLast('.').ifBlank { "pole tekstowe TV" } }
+                    show("Klawiatura TV aktywna: $source")
+                }
+            }) {
                 runOnUiThread { remote = null; show("$it — po powrocie połączę ponownie") }
             }
             val result = withContext(Dispatchers.IO) { client.connect() }
