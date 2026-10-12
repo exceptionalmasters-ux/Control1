@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
+    private enum class TextMode { REPLACE, KEYS }
     private lateinit var status: TextView
     private lateinit var host: EditText
     private lateinit var code: EditText
@@ -21,6 +22,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var remotePanel: View
     private var pairing: TvPairing? = null
     private var remote: TvRemote? = null
+    private var textMode = TextMode.REPLACE
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); setContentView(R.layout.activity_main)
@@ -39,6 +41,19 @@ class MainActivity : AppCompatActivity() {
         key(R.id.homeButton, TvKey.HOME); key(R.id.volumeDownButton, TvKey.VOL_DOWN)
         key(R.id.volumeUpButton, TvKey.VOL_UP); key(R.id.playPauseButton, TvKey.PLAY_PAUSE)
         key(R.id.powerButton, TvKey.POWER)
+        val styledButtons = intArrayOf(R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.sendTextButton,R.id.replaceModeButton,R.id.keysModeButton,R.id.backspaceButton,R.id.clearTextButton)
+        styledButtons.forEach { findViewById<Button>(it).backgroundTintList = null }
+        val replaceMode = findViewById<Button>(R.id.replaceModeButton)
+        val keysMode = findViewById<Button>(R.id.keysModeButton)
+        fun selectMode(mode: TextMode) {
+            textMode = mode; replaceMode.isSelected = mode == TextMode.REPLACE; keysMode.isSelected = mode == TextMode.KEYS
+            show(if(mode == TextMode.REPLACE) "Tryb tekstowy: zastąp zawartość pola" else "Tryb zgodności: wysyłanie znak po znaku")
+        }
+        replaceMode.setOnClickListener { selectMode(TextMode.REPLACE) }
+        keysMode.setOnClickListener { selectMode(TextMode.KEYS) }
+        selectMode(TextMode.REPLACE)
+        findViewById<Button>(R.id.backspaceButton).setOnClickListener { if(remote?.backspace()!=true)show("Najpierw połącz telewizor") }
+        findViewById<Button>(R.id.clearTextButton).setOnClickListener { if(remote?.clearText()!=true)show("Najpierw połącz telewizor") }
         findViewById<TouchpadView>(R.id.touchpad).listener = object : TouchpadView.Listener {
             override fun move(key: Int, repeats: Int) {
                 val client = remote ?: return show("Najpierw połącz telewizor")
@@ -49,8 +64,15 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.sendTextButton).setOnClickListener {
             val value = findViewById<EditText>(R.id.textInput).text.toString()
-            if (remote?.sendText(value) == true) show("Wysłano tekst")
-            else show("Najpierw połącz TV i ustaw na nim kursor w polu tekstowym")
+            val client = remote
+            if(client==null) show("Najpierw połącz TV i ustaw na nim kursor w polu tekstowym")
+            else if(textMode==TextMode.REPLACE) {
+                client.clearText()
+                if(client.sendText(value)) show("Zastąpiono tekst") else show("Nie udało się wysłać tekstu")
+            } else {
+                val skipped=client.sendTextAsKeys(value)
+                show(if(skipped==0) "Wysłano znak po znaku" else "Wysłano; pominięto $skipped nieobsługiwanych znaków")
+            }
         }
         show("Telefon i TV muszą być w tej samej sieci Wi‑Fi. Wpisz adres IP telewizora.")
     }

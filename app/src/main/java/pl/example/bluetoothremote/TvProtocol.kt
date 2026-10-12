@@ -33,7 +33,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509TrustManager
 
-object TvKey { const val HOME=3; const val BACK=4; const val UP=19; const val DOWN=20; const val LEFT=21; const val RIGHT=22; const val OK=23; const val VOL_UP=24; const val VOL_DOWN=25; const val POWER=26; const val PLAY_PAUSE=85 }
+object TvKey { const val HOME=3; const val BACK=4; const val UP=19; const val DOWN=20; const val LEFT=21; const val RIGHT=22; const val OK=23; const val VOL_UP=24; const val VOL_DOWN=25; const val POWER=26; const val PLAY_PAUSE=85; const val DEL=67; const val SHIFT=59; const val CTRL=113 }
 
 private sealed interface PVal { data class N(val v:Long):PVal; data class B(val v:ByteArray):PVal }
 private class PWriter {
@@ -95,6 +95,22 @@ class TvRemote(context:Context,private val host:String,private val event:(String
     private fun handle(m:Map<Int,List<PVal>>){when{m.has(1)->{features=(m.msg(1)?.num(1)?.toInt()?:0) and 615;send{message(1){number(1,features);message(2){string(1,android.os.Build.MODEL);string(2,android.os.Build.MANUFACTURER);number(3,1);string(4,"1");string(5,"pl.example.bluetoothremote");string(6,"0.2")}}}};m.has(2)->send{message(2){number(1,features)}};m.has(8)->send{message(9){number(1,m.msg(8)?.num(1)?:0)}};m.has(21)->{ime=m.msg(21)?.num(1)?.toInt()?:ime;field=m.msg(21)?.num(2)?.toInt()?:field};m.has(40)->ready=true}}
     fun sendKey(key:Int, direction:Int = 3):Boolean{if(!ready)return false;send{message(10){number(1,key);number(2,direction)}};return true}
     fun sendText(text:String):Boolean{if(!ready||text.isEmpty())return false;val caret=(text.length-1).coerceAtLeast(0);send{message(21){number(1,ime);number(2,field);message(3){number(1,1);message(2){number(1,caret);number(2,caret);string(3,text)}}}};return true}
+    fun sendTextAsKeys(text:String):Int {
+        if(!ready)return text.length
+        var skipped=0
+        text.forEach { char ->
+            val lower=char.lowercaseChar()
+            val code=when(lower){in 'a'..'z'->29+(lower-'a');in '0'..'9'->7+(lower-'0');' '->62;','->55;'.'->56;'-'->69;'='->70;'/'->76;'\''->75;';'->74;'['->71;']'->72;else->null}
+            if(code==null){skipped++}else if(char.isUpperCase()){sendKey(TvKey.SHIFT,1);sendKey(code);sendKey(TvKey.SHIFT,2)}else sendKey(code)
+        }
+        return skipped
+    }
+    fun backspace():Boolean=sendKey(TvKey.DEL)
+    fun clearText():Boolean {
+        if(!ready)return false
+        sendKey(TvKey.CTRL,1);sendKey(29);sendKey(TvKey.CTRL,2);sendKey(TvKey.DEL)
+        return true
+    }
     private fun send(build:PWriter.()->Unit){val data=PWriter().apply(build).data();val stream=output?:return;runCatching{writer.execute{runCatching{stream.frame(data)}.onFailure{ready=false;event("Błąd wysyłania do TV")}}}}
     override fun close(){ready=false;scope?.cancel();scope=null;runCatching{connection?.socket?.close()};connection=null;output=null;writer.shutdownNow()}
 }

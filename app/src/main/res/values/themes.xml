@@ -12,6 +12,7 @@
     <style name="ControlButton" parent="Widget.AppCompat.Button">
         <item name="android:background">@drawable/button_outline</item>
         <item name="android:backgroundTint">@null</item>
+        <item name="backgroundTint">@null</item>
         <item name="android:textColor">@color/button_text</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:textSize">12sp</item>

@@ -3,7 +3,6 @@ package pl.example.bluetoothremote
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -39,7 +38,7 @@ class TouchpadView @JvmOverloads constructor(
                     lastX=e.x;lastY=e.y
                 };return true
             }
-            MotionEvent.ACTION_UP -> { parent.requestDisallowInterceptTouchEvent(false);activeKey?.let { listener?.stop(it) };activeKey=null;if(hypot((e.x-startX).toDouble(),(e.y-startY).toDouble())<12*density)listener?.click();performClick();return true }
+            MotionEvent.ACTION_UP -> { parent.requestDisallowInterceptTouchEvent(false);val moved=activeKey!=null;activeKey?.let { listener?.stop(it) };activeKey=null;if(!moved && hypot((e.x-startX).toDouble(),(e.y-startY).toDouble())<36*density)listener?.click();performClick();return true }
             MotionEvent.ACTION_CANCEL -> { parent.requestDisallowInterceptTouchEvent(false);activeKey?.let { listener?.stop(it) };activeKey=null }
         };return true
     }
