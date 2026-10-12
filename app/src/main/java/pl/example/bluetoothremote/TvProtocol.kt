@@ -91,9 +91,10 @@ class TvPairing(context:Context,private val host:String):Closeable{
 }
 
 data class ImeState(val appPackage:String,val value:String,val label:String,val cursorStart:Int,val cursorEnd:Int)
+enum class TextMode { AUTO, IME, LEGACY }
 
 class TvRemote(context:Context,private val host:String,private val imeEvent:(ImeState)->Unit={},private val event:(String)->Unit):Closeable{
-    private val id=IdentityStore.get(context);private var connection:SecureConnection?=null;private var output:OutputStream?=null;private var scope:CoroutineScope?=null;private val writer=Executors.newSingleThreadExecutor();@Volatile private var ready=false;@Volatile private var ime=0;@Volatile private var field=0;@Volatile private var imeFieldActive=false;@Volatile private var imeValue="";private var features=0
+    private val id=IdentityStore.get(context);private var connection:SecureConnection?=null;private var output:OutputStream?=null;private var scope:CoroutineScope?=null;private val writer=Executors.newSingleThreadExecutor();@Volatile private var ready=false;@Volatile private var batchIme=0;@Volatile private var batchField=0;@Volatile private var appIme=0;@Volatile private var statusField=0;@Volatile private var imeFieldActive=false;@Volatile private var imeValue="";@Volatile private var appPackage="";@Volatile private var textMode=TextMode.AUTO;private var features=0
     fun connect(): Result<Unit> = runCatching{val c=tls(host,6466,id,10000);connection=c;output=c.socket.outputStream;val input=c.socket.inputStream;while(!ready)handle(parse(input.frame()));c.socket.soTimeout=0;scope=CoroutineScope(SupervisorJob()+Dispatchers.IO).also{it.launch{runCatching{while(true)handle(parse(input.frame()))}.onFailure{if(ready){ready=false;event("Utracono połączenie z TV")}}}}}.onFailure{close()}
     private fun handle(m:Map<Int,List<PVal>>){when{
         m.has(1)->{features=(m.msg(1)?.num(1)?.toInt()?:0) and 615;send{message(1){number(1,features);message(2){string(1,android.os.Build.MODEL);string(2,android.os.Build.MANUFACTURER);number(3,1);string(4,"1");string(5,"pl.example.bluetoothremote");string(6,"0.13")}}}}
@@ -101,11 +102,12 @@ class TvRemote(context:Context,private val host:String,private val imeEvent:(Ime
         m.has(8)->send{message(9){number(1,m.msg(8)?.num(1)?:0)}}
         m.has(20)->{
             val message=m.msg(20);val app=message?.msg(1);val status=message?.msg(2)
-            if(status!=null){status.num(1)?.toInt()?.takeIf{it!=0}?.let{field=it};publishIme(app?.str(12).orEmpty(),status)}
+            app?.num(1)?.toInt()?.let{appIme=it};app?.str(12)?.takeIf{it.isNotEmpty()}?.let{appPackage=it}
+            if(status!=null){status.num(1)?.toInt()?.let{statusField=it};publishIme(appPackage,status)}
             else imeFieldActive=false
         }
-        m.has(21)->{val edit=m.msg(21);edit?.num(1)?.toInt()?.takeIf{it!=0}?.let{ime=it};edit?.num(2)?.toInt()?.takeIf{it!=0}?.let{field=it}}
-        m.has(22)->{val status=m.msg(22)?.msg(2);status?.num(1)?.toInt()?.takeIf{it!=0}?.let{field=it};publishIme("",status)}
+        m.has(21)->{val edit=m.msg(21);edit?.num(1)?.toInt()?.let{batchIme=it};edit?.num(2)?.toInt()?.let{batchField=it}}
+        m.has(22)->{val status=m.msg(22)?.msg(2);status?.num(1)?.toInt()?.let{statusField=it};publishIme(appPackage,status)}
         m.has(40)->ready=true
     }}
     private fun publishIme(app:String,status:Map<Int,List<PVal>>?){
@@ -116,11 +118,15 @@ class TvRemote(context:Context,private val host:String,private val imeEvent:(Ime
     fun sendKey(key:Int, direction:Int = 3):Boolean{if(!ready)return false;send{message(10){number(1,key);number(2,direction)}};return true}
     fun sendText(text:String):Boolean{
         if(!ready||text.isEmpty())return false
-        if(imeFieldActive){val at=imeValue.length;sendImeEdit(at,at,text);imeValue+=text}
-        else {val caret=(text.length-1).coerceAtLeast(0);sendImeEdit(caret,caret,text)}
+        val caret=(text.length-1).coerceAtLeast(0);sendImeEdit(caret,caret,text,useImeMode())
         return true
     }
-    private fun sendImeEdit(start:Int,end:Int,text:String){send{message(21){number(1,ime);number(2,field);message(3){number(1,1);message(2){number(1,start);number(2,end);string(3,text)}}}}}
+    fun setTextMode(mode:TextMode){textMode=mode}
+    private fun useImeMode()=when(textMode){TextMode.IME->true;TextMode.LEGACY->false;TextMode.AUTO->!appPackage.contains("youtube",true)&&imeFieldActive}
+    private fun sendImeEdit(start:Int,end:Int,text:String,imeMode:Boolean){
+        val imeCounter=if(imeMode)appIme else batchIme;val fieldCounter=if(imeMode)statusField else batchField
+        send{message(21){number(1,imeCounter);number(2,fieldCounter);message(3){number(1,1);message(2){number(1,start);number(2,end);string(3,text)}}}}
+    }
     fun sendTextAsKeys(text:String):Int {
         if(!ready)return text.length
         var skipped=0
@@ -140,12 +146,12 @@ class TvRemote(context:Context,private val host:String,private val imeEvent:(Ime
     }
     fun backspace():Boolean{
         if(!ready)return false
-        if(imeFieldActive&&imeValue.isNotEmpty()){val end=imeValue.length;sendImeEdit(end-1,end,"");imeValue=imeValue.dropLast(1);return true}
+        if(useImeMode()&&imeFieldActive&&imeValue.isNotEmpty()){val end=imeValue.length;sendImeEdit(end-1,end,"",true);imeValue=imeValue.dropLast(1);return true}
         return sendKey(TvKey.DEL)
     }
     fun clearText():Boolean {
         if(!ready)return false
-        if(imeFieldActive&&imeValue.isNotEmpty()){sendImeEdit(0,imeValue.length,"");imeValue="";return true}
+        if(useImeMode()&&imeFieldActive&&imeValue.isNotEmpty()){sendImeEdit(0,imeValue.length,"",true);imeValue="";return true}
         sendKey(TvKey.CTRL,1);sendKey(29);sendKey(TvKey.CTRL,2);sendKey(TvKey.DEL)
         return true
     }

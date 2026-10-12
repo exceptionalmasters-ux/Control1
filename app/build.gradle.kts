@@ -16,8 +16,8 @@ android {
         applicationId = "pl.example.bluetoothremote"
         minSdk = 28
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.14.0"
+        versionCode = 15
+        versionName = "0.15.0"
     }
 
     packaging {

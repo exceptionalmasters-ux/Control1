@@ -30,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     private var remote: TvRemote? = null
     private var shiftOn = false
     private var symbolsOn = false
+    private var textMode = TextMode.AUTO
     private val keyboardBuffer = StringBuilder()
     private val handler = Handler(Looper.getMainLooper())
     private var lastKeyboardTapAt = 0L
@@ -52,7 +53,7 @@ class MainActivity : AppCompatActivity() {
         key(R.id.homeButton, TvKey.HOME); key(R.id.volumeDownButton, TvKey.VOL_DOWN)
         key(R.id.volumeUpButton, TvKey.VOL_UP); key(R.id.playPauseButton, TvKey.PLAY_PAUSE)
         key(R.id.powerButton, TvKey.POWER)
-        val styledButtons = intArrayOf(R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.sendTextButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
+        val styledButtons = intArrayOf(R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.textModeButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.sendTextButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
         styledButtons.forEach { findViewById<Button>(it).backgroundTintList = null }
         setupKeyboard()
         setupBackspace()
@@ -83,6 +84,12 @@ class MainActivity : AppCompatActivity() {
     private fun setupKeyboard() {
         val panel=findViewById<View>(R.id.keyboardPanel)
         findViewById<Button>(R.id.keyboardToggleButton).setOnClickListener { panel.visibility=if(panel.visibility==View.VISIBLE)View.GONE else View.VISIBLE }
+        val modeButton=findViewById<Button>(R.id.textModeButton)
+        modeButton.setOnClickListener {
+            textMode=when(textMode){TextMode.AUTO->TextMode.IME;TextMode.IME->TextMode.LEGACY;TextMode.LEGACY->TextMode.AUTO}
+            modeButton.text=when(textMode){TextMode.AUTO->"Tryb: AUTO";TextMode.IME->"Tryb: IME";TextMode.LEGACY->"Tryb: ZWYKŁY"}
+            remote?.setTextMode(textMode)
+        }
         rebuildKeyboard()
         val symbols=findViewById<Button>(R.id.symbolsButton)
         symbols.setOnClickListener { symbolsOn=!symbolsOn;symbols.text=if(symbolsOn)"ABC" else "123";shiftOn=false;findViewById<Button>(R.id.shiftButton).isSelected=false;rebuildKeyboard() }
@@ -184,7 +191,7 @@ class MainActivity : AppCompatActivity() {
             }
             val result = withContext(Dispatchers.IO) { client.connect() }
             result.onSuccess {
-                remote = client; saveHost(); setupPanel.visibility = View.GONE
+                client.setTextMode(textMode);remote = client; saveHost(); setupPanel.visibility = View.GONE
                 remotePanel.visibility = View.VISIBLE; show("Połączono — pilot jest gotowy")
             }
                 .onFailure { client.close(); show(errorText(it)) }
