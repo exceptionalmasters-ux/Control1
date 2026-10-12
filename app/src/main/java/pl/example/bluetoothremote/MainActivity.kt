@@ -71,7 +71,7 @@ class MainActivity : AppCompatActivity() {
             }
             override fun stop(key: Int) { if(appMode==AppMode.TV)remote?.sendKey(key, 2) }
             override fun click() { if(appMode==AppMode.PC){if(pc?.click()!=true)show("Najpierw połącz komputer")}else remote?.sendKey(TvKey.OK) ?: show("Najpierw połącz telewizor") }
-            override fun pointer(dx:Float,dy:Float):Boolean {if(appMode!=AppMode.PC)return false;pc?.mouse((dx*1.8f).toInt(),(dy*1.8f).toInt())?:show("Najpierw połącz komputer");return true}
+            override fun pointer(dx:Float,dy:Float):Boolean {if(appMode!=AppMode.PC)return false;pc?.mouse((dx*0.7f).toInt(),(dy*0.7f).toInt())?:show("Najpierw połącz komputer");return true}
         }
         findViewById<Button>(R.id.openUrlButton).setOnClickListener {
             val raw=findViewById<EditText>(R.id.browserInput).text.toString().trim()
