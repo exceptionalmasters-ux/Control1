@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
@@ -28,9 +29,11 @@ class MainActivity : AppCompatActivity() {
     private var pairing: TvPairing? = null
     private var remote: TvRemote? = null
     private var shiftOn = false
+    private var symbolsOn = false
     private val keyboardBuffer = StringBuilder()
     private val handler = Handler(Looper.getMainLooper())
     private var lastKeyboardTapAt = 0L
+    private var backspaceHeld = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); setContentView(R.layout.activity_main)
@@ -49,22 +52,10 @@ class MainActivity : AppCompatActivity() {
         key(R.id.homeButton, TvKey.HOME); key(R.id.volumeDownButton, TvKey.VOL_DOWN)
         key(R.id.volumeUpButton, TvKey.VOL_UP); key(R.id.playPauseButton, TvKey.PLAY_PAUSE)
         key(R.id.powerButton, TvKey.POWER)
-        val styledButtons = intArrayOf(R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.shiftButton,R.id.spaceButton,R.id.enterButton,R.id.backspaceButton,R.id.clearTextButton,R.id.openUrlButton,R.id.searchWebButton)
+        val styledButtons = intArrayOf(R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
         styledButtons.forEach { findViewById<Button>(it).backgroundTintList = null }
         setupKeyboard()
-        findViewById<Button>(R.id.backspaceButton).setOnClickListener {
-            if (!acceptKeyboardTap()) return@setOnClickListener
-            if (remote?.backspace() != true) show("Najpierw połącz telewizor")
-            else if (keyboardBuffer.isNotEmpty()) {
-                keyboardBuffer.deleteCharAt(keyboardBuffer.length - 1)
-                refreshKeyboardBuffer()
-            }
-        }
-        findViewById<Button>(R.id.clearTextButton).setOnClickListener {
-            val client=remote
-            if(client?.clearByHoldingBackspace()!=true)show("Najpierw połącz telewizor")
-            else { keyboardBuffer.clear();refreshKeyboardBuffer();show("Czyszczenie pola przez 3 sekundy…");handler.postDelayed({client.sendKey(TvKey.DEL,2)},3000) }
-        }
+        setupBackspace()
         findViewById<TouchpadView>(R.id.touchpad).listener = object : TouchpadView.Listener {
             override fun move(key: Int, repeats: Int) {
                 val client = remote ?: return show("Najpierw połącz telewizor")
@@ -92,11 +83,17 @@ class MainActivity : AppCompatActivity() {
     private fun setupKeyboard() {
         val panel=findViewById<View>(R.id.keyboardPanel)
         findViewById<Button>(R.id.keyboardToggleButton).setOnClickListener { panel.visibility=if(panel.visibility==View.VISIBLE)View.GONE else View.VISIBLE }
-        addKeyRow(R.id.keyRow1,"qwertyuiop");addKeyRow(R.id.keyRow2,"asdfghjkl");addKeyRow(R.id.keyRow3,"zxcvbnm,.")
+        rebuildKeyboard()
+        val symbols=findViewById<Button>(R.id.symbolsButton)
+        symbols.setOnClickListener { symbolsOn=!symbolsOn;symbols.text=if(symbolsOn)"ABC" else "123";shiftOn=false;findViewById<Button>(R.id.shiftButton).isSelected=false;rebuildKeyboard() }
         val shift=findViewById<Button>(R.id.shiftButton)
-        shift.setOnClickListener { shiftOn=!shiftOn;shift.isSelected=shiftOn }
+        shift.setOnClickListener { if(!symbolsOn){shiftOn=!shiftOn;shift.isSelected=shiftOn} }
         findViewById<Button>(R.id.spaceButton).setOnClickListener { typeOnTv(' ') }
         findViewById<Button>(R.id.enterButton).setOnClickListener { if(remote?.sendKey(TvKey.ENTER)!=true)show("Najpierw połącz telewizor") }
+    }
+    private fun rebuildKeyboard(){
+        val rows=if(symbolsOn) arrayOf("1234567890","@#\u20ac_&-+()","*/\"':;!?") else arrayOf("qwertyuiop","asdfghjkl","zxcvbnm,.")
+        intArrayOf(R.id.keyRow1,R.id.keyRow2,R.id.keyRow3).forEachIndexed { index,id -> findViewById<LinearLayout>(id).removeAllViews();addKeyRow(id,rows[index]) }
     }
     private fun addKeyRow(rowId:Int,chars:String){
         val row=findViewById<LinearLayout>(rowId)
@@ -123,6 +120,26 @@ class MainActivity : AppCompatActivity() {
         return true
     }
     private fun refreshKeyboardBuffer(){findViewById<TextView>(R.id.keyboardBuffer).text=keyboardBuffer.toString().ifEmpty{"Wpisywany tekst pojawi się tutaj"}}
+    private fun setupBackspace(){
+        val button=findViewById<Button>(R.id.backspaceButton)
+        val clearAction=Runnable {
+            backspaceHeld=true;keyboardBuffer.clear();refreshKeyboardBuffer();show("Pole wyczyszczone")
+        }
+        button.setOnTouchListener { _,event ->
+            when(event.actionMasked){
+                MotionEvent.ACTION_DOWN->{
+                    backspaceHeld=false
+                    if(remote?.clearByHoldingBackspace()!=true)show("Najpierw połącz telewizor")
+                    else handler.postDelayed(clearAction,3000)
+                    true
+                }
+                MotionEvent.ACTION_UP->{handler.removeCallbacks(clearAction);remote?.sendKey(TvKey.DEL,2);if(!backspaceHeld)deleteOneFromBuffer();true}
+                MotionEvent.ACTION_CANCEL->{handler.removeCallbacks(clearAction);remote?.sendKey(TvKey.DEL,2);true}
+                else->true
+            }
+        }
+    }
+    private fun deleteOneFromBuffer(){if(keyboardBuffer.isNotEmpty()){keyboardBuffer.deleteCharAt(keyboardBuffer.length-1);refreshKeyboardBuffer()}}
     private fun startPairing() {
         if (address().isEmpty()) return show("Wpisz adres IP telewizora, np. 192.168.1.50")
         busy(true); show("Łączenie z usługą parowania TV…")
