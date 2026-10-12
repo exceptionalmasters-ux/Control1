@@ -129,18 +129,18 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackspace(){
         val button=findViewById<Button>(R.id.backspaceButton)
         val clearAction=Runnable {
-            backspaceHeld=true;keyboardBuffer.clear();refreshKeyboardBuffer();show("Pole wyczyszczone")
+            if(remote?.clearText()!=true)show("Najpierw połącz telewizor")
+            else {backspaceHeld=true;keyboardBuffer.clear();refreshKeyboardBuffer();show("Pole wyczyszczone")}
         }
         button.setOnTouchListener { _,event ->
             when(event.actionMasked){
                 MotionEvent.ACTION_DOWN->{
                     backspaceHeld=false
-                    if(remote?.clearByHoldingBackspace()!=true)show("Najpierw połącz telewizor")
-                    else handler.postDelayed(clearAction,3000)
+                    if(remote==null)show("Najpierw połącz telewizor") else handler.postDelayed(clearAction,3000)
                     true
                 }
-                MotionEvent.ACTION_UP->{handler.removeCallbacks(clearAction);remote?.sendKey(TvKey.DEL,2);if(!backspaceHeld)deleteOneFromBuffer();true}
-                MotionEvent.ACTION_CANCEL->{handler.removeCallbacks(clearAction);remote?.sendKey(TvKey.DEL,2);true}
+                MotionEvent.ACTION_UP->{handler.removeCallbacks(clearAction);if(!backspaceHeld){remote?.backspace();deleteOneFromBuffer()};true}
+                MotionEvent.ACTION_CANCEL->{handler.removeCallbacks(clearAction);true}
                 else->true
             }
         }
