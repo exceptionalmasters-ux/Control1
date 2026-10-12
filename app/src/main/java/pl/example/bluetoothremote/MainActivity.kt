@@ -1,18 +1,22 @@
 package pl.example.bluetoothremote
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
-    private enum class TextMode { REPLACE, KEYS }
     private lateinit var status: TextView
     private lateinit var host: EditText
     private lateinit var code: EditText
@@ -22,7 +26,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var remotePanel: View
     private var pairing: TvPairing? = null
     private var remote: TvRemote? = null
-    private var textMode = TextMode.REPLACE
+    private var shiftOn = false
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); setContentView(R.layout.activity_main)
@@ -41,19 +46,15 @@ class MainActivity : AppCompatActivity() {
         key(R.id.homeButton, TvKey.HOME); key(R.id.volumeDownButton, TvKey.VOL_DOWN)
         key(R.id.volumeUpButton, TvKey.VOL_UP); key(R.id.playPauseButton, TvKey.PLAY_PAUSE)
         key(R.id.powerButton, TvKey.POWER)
-        val styledButtons = intArrayOf(R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.sendTextButton,R.id.replaceModeButton,R.id.keysModeButton,R.id.backspaceButton,R.id.clearTextButton)
+        val styledButtons = intArrayOf(R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.shiftButton,R.id.spaceButton,R.id.enterButton,R.id.backspaceButton,R.id.clearTextButton)
         styledButtons.forEach { findViewById<Button>(it).backgroundTintList = null }
-        val replaceMode = findViewById<Button>(R.id.replaceModeButton)
-        val keysMode = findViewById<Button>(R.id.keysModeButton)
-        fun selectMode(mode: TextMode) {
-            textMode = mode; replaceMode.isSelected = mode == TextMode.REPLACE; keysMode.isSelected = mode == TextMode.KEYS
-            show(if(mode == TextMode.REPLACE) "Tryb tekstowy: zastąp zawartość pola" else "Tryb zgodności: wysyłanie znak po znaku")
-        }
-        replaceMode.setOnClickListener { selectMode(TextMode.REPLACE) }
-        keysMode.setOnClickListener { selectMode(TextMode.KEYS) }
-        selectMode(TextMode.REPLACE)
+        setupKeyboard()
         findViewById<Button>(R.id.backspaceButton).setOnClickListener { if(remote?.backspace()!=true)show("Najpierw połącz telewizor") }
-        findViewById<Button>(R.id.clearTextButton).setOnClickListener { if(remote?.clearText()!=true)show("Najpierw połącz telewizor") }
+        findViewById<Button>(R.id.clearTextButton).setOnClickListener {
+            val client=remote
+            if(client?.clearByHoldingBackspace()!=true)show("Najpierw połącz telewizor")
+            else { show("Czyszczenie pola przez 3 sekundy…");handler.postDelayed({client.sendKey(TvKey.DEL,2)},3000) }
+        }
         findViewById<TouchpadView>(R.id.touchpad).listener = object : TouchpadView.Listener {
             override fun move(key: Int, repeats: Int) {
                 val client = remote ?: return show("Najpierw połącz telewizor")
@@ -62,22 +63,32 @@ class MainActivity : AppCompatActivity() {
             override fun stop(key: Int) { remote?.sendKey(key, 2) }
             override fun click() { remote?.sendKey(TvKey.OK) ?: show("Najpierw połącz telewizor") }
         }
-        findViewById<Button>(R.id.sendTextButton).setOnClickListener {
-            val value = findViewById<EditText>(R.id.textInput).text.toString()
-            val client = remote
-            if(client==null) show("Najpierw połącz TV i ustaw na nim kursor w polu tekstowym")
-            else if(textMode==TextMode.REPLACE) {
-                client.clearText()
-                if(client.sendText(value)) show("Zastąpiono tekst") else show("Nie udało się wysłać tekstu")
-            } else {
-                val skipped=client.sendTextAsKeys(value)
-                show(if(skipped==0) "Wysłano znak po znaku" else "Wysłano; pominięto $skipped nieobsługiwanych znaków")
-            }
-        }
         show("Telefon i TV muszą być w tej samej sieci Wi‑Fi. Wpisz adres IP telewizora.")
     }
 
     private fun address() = host.text.toString().trim()
+    private fun setupKeyboard() {
+        val panel=findViewById<View>(R.id.keyboardPanel)
+        findViewById<Button>(R.id.keyboardToggleButton).setOnClickListener { panel.visibility=if(panel.visibility==View.VISIBLE)View.GONE else View.VISIBLE }
+        addKeyRow(R.id.keyRow1,"qwertyuiop");addKeyRow(R.id.keyRow2,"asdfghjkl");addKeyRow(R.id.keyRow3,"zxcvbnm,.")
+        val shift=findViewById<Button>(R.id.shiftButton)
+        shift.setOnClickListener { shiftOn=!shiftOn;shift.isSelected=shiftOn }
+        findViewById<Button>(R.id.spaceButton).setOnClickListener { remote?.sendCharacter(' ') ?: show("Najpierw połącz telewizor") }
+        findViewById<Button>(R.id.enterButton).setOnClickListener { if(remote?.sendKey(TvKey.ENTER)!=true)show("Najpierw połącz telewizor") }
+    }
+    private fun addKeyRow(rowId:Int,chars:String){
+        val row=findViewById<LinearLayout>(rowId)
+        chars.forEach { ch ->
+            val button=Button(this).apply {
+                text=ch.toString().uppercase();gravity=Gravity.CENTER;textSize=11f;minWidth=0;minHeight=0
+                backgroundTintList=null;setBackgroundResource(R.drawable.button_outline)
+                setTextColor(ContextCompat.getColorStateList(this@MainActivity,R.color.button_text))
+                layoutParams=LinearLayout.LayoutParams(0,matchParentHeight(),1f).apply{setMargins(2,1,2,1)}
+                setOnClickListener { if(remote?.sendCharacter(ch,shiftOn)!=true)show("Najpierw połącz telewizor") else if(shiftOn){shiftOn=false;findViewById<Button>(R.id.shiftButton).isSelected=false} }
+            };row.addView(button)
+        }
+    }
+    private fun matchParentHeight()=LinearLayout.LayoutParams.MATCH_PARENT
     private fun startPairing() {
         if (address().isEmpty()) return show("Wpisz adres IP telewizora, np. 192.168.1.50")
         busy(true); show("Łączenie z usługą parowania TV…")

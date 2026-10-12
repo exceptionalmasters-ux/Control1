@@ -33,7 +33,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509TrustManager
 
-object TvKey { const val HOME=3; const val BACK=4; const val UP=19; const val DOWN=20; const val LEFT=21; const val RIGHT=22; const val OK=23; const val VOL_UP=24; const val VOL_DOWN=25; const val POWER=26; const val PLAY_PAUSE=85; const val DEL=67; const val SHIFT=59; const val CTRL=113 }
+object TvKey { const val HOME=3; const val BACK=4; const val UP=19; const val DOWN=20; const val LEFT=21; const val RIGHT=22; const val OK=23; const val VOL_UP=24; const val VOL_DOWN=25; const val POWER=26; const val PLAY_PAUSE=85; const val ENTER=66; const val DEL=67; const val SHIFT=59; const val CTRL=113 }
 
 private sealed interface PVal { data class N(val v:Long):PVal; data class B(val v:ByteArray):PVal }
 private class PWriter {
@@ -105,10 +105,22 @@ class TvRemote(context:Context,private val host:String,private val event:(String
         }
         return skipped
     }
+    fun sendCharacter(char:Char, shifted:Boolean=false):Boolean {
+        if(!ready)return false
+        val lower=char.lowercaseChar()
+        val code=when(lower){in 'a'..'z'->29+(lower-'a');in '0'..'9'->7+(lower-'0');' '->62;','->55;'.'->56;'-'->69;'='->70;'/'->76;'\''->75;';'->74;'['->71;']'->72;else->null}?:return false
+        if(shifted||char.isUpperCase()){sendKey(TvKey.SHIFT,1);sendKey(code);sendKey(TvKey.SHIFT,2)}else sendKey(code)
+        return true
+    }
     fun backspace():Boolean=sendKey(TvKey.DEL)
     fun clearText():Boolean {
         if(!ready)return false
         sendKey(TvKey.CTRL,1);sendKey(29);sendKey(TvKey.CTRL,2);sendKey(TvKey.DEL)
+        return true
+    }
+    fun clearByHoldingBackspace():Boolean {
+        if(!ready)return false
+        sendKey(TvKey.DEL,1)
         return true
     }
     private fun send(build:PWriter.()->Unit){val data=PWriter().apply(build).data();val stream=output?:return;runCatching{writer.execute{runCatching{stream.frame(data)}.onFailure{ready=false;event("Błąd wysyłania do TV")}}}}
