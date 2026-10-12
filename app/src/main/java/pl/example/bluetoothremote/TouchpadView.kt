@@ -12,7 +12,7 @@ import kotlin.math.hypot
 class TouchpadView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null
 ) : View(context, attrs) {
-    interface Listener { fun move(key: Int, repeats: Int); fun stop(key: Int); fun click() }
+    interface Listener { fun move(key: Int, repeats: Int); fun stop(key: Int); fun click(); fun pointer(dx:Float,dy:Float):Boolean=false }
     var listener: Listener? = null
     private var startX = 0f; private var startY = 0f; private var lastX = 0f; private var lastY = 0f
     private val density = resources.displayMetrics.density
@@ -28,6 +28,7 @@ class TouchpadView @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN -> { startX=e.x;startY=e.y;lastX=e.x;lastY=e.y;parent.requestDisallowInterceptTouchEvent(true);return true }
             MotionEvent.ACTION_MOVE -> {
                 val dx=e.x-lastX; val dy=e.y-lastY; val step=18f*density
+                if(listener?.pointer(dx,dy)==true){lastX=e.x;lastY=e.y;return true}
                 if (hypot(dx.toDouble(),dy.toDouble()) >= step) {
                     val key=if(abs(dx)>abs(dy)) if(dx>0) TvKey.RIGHT else TvKey.LEFT else if(dy>0) TvKey.DOWN else TvKey.UP
                     if (activeKey != key) {

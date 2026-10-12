@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URLEncoder
 
+private enum class AppMode { TV, PC }
+
 class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var host: EditText
@@ -28,6 +30,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var remotePanel: View
     private var pairing: TvPairing? = null
     private var remote: TvRemote? = null
+    private var pc: PcClient? = null
+    private var appMode = AppMode.TV
     private var shiftOn = false
     private var symbolsOn = false
     private var textMode = TextMode.AUTO
@@ -43,27 +47,31 @@ class MainActivity : AppCompatActivity() {
         confirmButton = findViewById(R.id.confirmButton)
         setupPanel = findViewById(R.id.setupPanel); remotePanel = findViewById(R.id.remotePanel)
         host.setText(getSharedPreferences("tv", MODE_PRIVATE).getString("host", "192.168.0.100"))
-        pairButton.setOnClickListener { startPairing() }
+        pairButton.setOnClickListener { if(appMode==AppMode.TV)startPairing() else startPcPairing() }
         confirmButton.setOnClickListener { finishPairing() }
         findViewById<Button>(R.id.connectButton).setOnClickListener { connect() }
-        findViewById<Button>(R.id.showSetupButton).setOnClickListener { setupPanel.visibility = View.VISIBLE }
+        findViewById<Button>(R.id.deviceModeButton).setOnClickListener { switchDeviceMode() }
+        findViewById<Button>(R.id.showSetupButton).setOnClickListener {
+            setupPanel.visibility=if(setupPanel.visibility==View.VISIBLE)View.GONE else View.VISIBLE
+        }
         key(R.id.upButton, TvKey.UP); key(R.id.downButton, TvKey.DOWN)
         key(R.id.leftButton, TvKey.LEFT); key(R.id.rightButton, TvKey.RIGHT)
         key(R.id.okButton, TvKey.OK); key(R.id.backButton, TvKey.BACK)
         key(R.id.homeButton, TvKey.HOME); key(R.id.volumeDownButton, TvKey.VOL_DOWN)
         key(R.id.volumeUpButton, TvKey.VOL_UP); key(R.id.playPauseButton, TvKey.PLAY_PAUSE)
         key(R.id.powerButton, TvKey.POWER)
-        val styledButtons = intArrayOf(R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.textModeButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.sendTextButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
+        val styledButtons = intArrayOf(R.id.deviceModeButton,R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.textModeButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.sendTextButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
         styledButtons.forEach { findViewById<Button>(it).backgroundTintList = null }
         setupKeyboard()
         setupBackspace()
         findViewById<TouchpadView>(R.id.touchpad).listener = object : TouchpadView.Listener {
             override fun move(key: Int, repeats: Int) {
-                val client = remote ?: return show("Najpierw połącz telewizor")
-                client.sendKey(key, 1)
+                if(appMode==AppMode.PC)return
+                val client = remote ?: return show("Najpierw połącz telewizor");client.sendKey(key, 1)
             }
-            override fun stop(key: Int) { remote?.sendKey(key, 2) }
-            override fun click() { remote?.sendKey(TvKey.OK) ?: show("Najpierw połącz telewizor") }
+            override fun stop(key: Int) { if(appMode==AppMode.TV)remote?.sendKey(key, 2) }
+            override fun click() { if(appMode==AppMode.PC){if(pc?.click()!=true)show("Najpierw połącz komputer")}else remote?.sendKey(TvKey.OK) ?: show("Najpierw połącz telewizor") }
+            override fun pointer(dx:Float,dy:Float):Boolean {if(appMode!=AppMode.PC)return false;pc?.mouse((dx*1.8f).toInt(),(dy*1.8f).toInt())?:show("Najpierw połącz komputer");return true}
         }
         findViewById<Button>(R.id.openUrlButton).setOnClickListener {
             val raw=findViewById<EditText>(R.id.browserInput).text.toString().trim()
@@ -78,6 +86,25 @@ class MainActivity : AppCompatActivity() {
             if(query.isEmpty())show("Wpisz zapytanie")else if(remote?.openUrl(url)==true)show("Wysyłanie wyszukiwania")else show("Najpierw połącz telewizor")
         }
         show("Telefon i TV muszą być w tej samej sieci Wi‑Fi. Wpisz adres IP telewizora.")
+    }
+
+    private fun switchDeviceMode(){
+        saveHost();remote?.close();remote=null;pc?.close();pc=null
+        appMode=if(appMode==AppMode.TV)AppMode.PC else AppMode.TV
+        val prefs=getSharedPreferences(if(appMode==AppMode.TV)"tv" else "pc",MODE_PRIVATE)
+        host.setText(prefs.getString("host",if(appMode==AppMode.TV)"192.168.0.100" else "192.168.0.2"))
+        val pcMode=appMode==AppMode.PC
+        findViewById<Button>(R.id.deviceModeButton).text=if(pcMode)"TV" else "PC"
+        findViewById<Button>(R.id.showSetupButton).text=if(pcMode)"PC" else "TV"
+        findViewById<TextView>(R.id.modeSubtitle).text=if(pcMode)"Pilot Windows przez Wi‑Fi" else "Pilot Android TV przez Wi‑Fi"
+        findViewById<TextView>(R.id.setupTitle).text=if(pcMode)"Połączenie z komputerem" else "Połączenie z telewizorem"
+        pairButton.text=if(pcMode)"Paruj PC" else "Paruj"
+        code.visibility=if(pcMode)View.VISIBLE else View.GONE;code.hint=if(pcMode)"6-cyfrowy kod z programu Windows" else "6-znakowy kod z TV"
+        confirmButton.visibility=View.GONE
+        findViewById<View>(R.id.browserPanel).visibility=if(pcMode)View.GONE else View.VISIBLE
+        findViewById<View>(R.id.textModeButton).visibility=if(pcMode)View.GONE else View.VISIBLE
+        setupPanel.visibility=View.VISIBLE
+        show(if(pcMode)"Uruchom Control One Receiver na komputerze, wpisz IP i kod." else "Wpisz adres IP telewizora.")
     }
 
     private fun address() = host.text.toString().trim()
@@ -95,14 +122,14 @@ class MainActivity : AppCompatActivity() {
         symbols.setOnClickListener { symbolsOn=!symbolsOn;symbols.text=if(symbolsOn)"ABC" else "123";shiftOn=false;findViewById<Button>(R.id.shiftButton).isSelected=false;rebuildKeyboard() }
         val shift=findViewById<Button>(R.id.shiftButton)
         shift.setOnClickListener { if(!symbolsOn){shiftOn=!shiftOn;shift.isSelected=shiftOn} }
-        findViewById<Button>(R.id.spaceButton).setOnClickListener { typeOnTv(' ') }
+        findViewById<Button>(R.id.spaceButton).setOnClickListener { typeCharacter(' ') }
         findViewById<Button>(R.id.sendTextButton).setOnClickListener {
             val text=keyboardBuffer.toString()
             if(text.isEmpty())show("Najpierw wpisz tekst")
-            else if(remote?.sendText(text)==true)show("Wysłano tekst")
-            else show("Najpierw połącz telewizor")
+            else if(if(appMode==AppMode.PC)pc?.text(text)==true else remote?.sendText(text)==true)show("Wysłano tekst")
+            else show(if(appMode==AppMode.PC)"Najpierw połącz komputer" else "Najpierw połącz telewizor")
         }
-        findViewById<Button>(R.id.enterButton).setOnClickListener { if(remote?.sendKey(TvKey.ENTER)!=true)show("Najpierw połącz telewizor") }
+        findViewById<Button>(R.id.enterButton).setOnClickListener { if(appMode==AppMode.PC){if(pc?.key("enter")!=true)show("Najpierw połącz komputer")}else if(remote?.sendKey(TvKey.ENTER)!=true)show("Najpierw połącz telewizor") }
     }
     private fun rebuildKeyboard(){
         val rows=if(symbolsOn) arrayOf("1234567890","@#\u20ac_&-+()","*/\"':;!?") else arrayOf("qwertyuiop","asdfghjkl","zxcvbnm,.")
@@ -116,14 +143,15 @@ class MainActivity : AppCompatActivity() {
                 backgroundTintList=null;setBackgroundResource(R.drawable.button_outline)
                 setTextColor(ContextCompat.getColorStateList(this@MainActivity,R.color.button_text))
                 layoutParams=LinearLayout.LayoutParams(0,matchParentHeight(),1f).apply{setMargins(2,1,2,1)}
-                setOnClickListener { typeOnTv(if(shiftOn)ch.uppercaseChar() else ch);if(shiftOn){shiftOn=false;findViewById<Button>(R.id.shiftButton).isSelected=false} }
+                setOnClickListener { typeCharacter(if(shiftOn)ch.uppercaseChar() else ch);if(shiftOn){shiftOn=false;findViewById<Button>(R.id.shiftButton).isSelected=false} }
             };row.addView(button)
         }
     }
     private fun matchParentHeight()=LinearLayout.LayoutParams.MATCH_PARENT
-    private fun typeOnTv(char:Char){
+    private fun typeCharacter(char:Char){
         if (!acceptKeyboardTap()) return
-        if(remote?.sendText(char.toString())!=true) show("Najpierw połącz telewizor")
+        val sent=if(appMode==AppMode.PC)pc?.text(char.toString())==true else remote?.sendText(char.toString())==true
+        if(!sent) show(if(appMode==AppMode.PC)"Najpierw połącz komputer" else "Najpierw połącz telewizor")
         else { keyboardBuffer.append(char);refreshKeyboardBuffer() }
     }
     private fun acceptKeyboardTap():Boolean {
@@ -136,17 +164,18 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackspace(){
         val button=findViewById<Button>(R.id.backspaceButton)
         val clearAction=Runnable {
-            if(remote?.clearText()!=true)show("Najpierw połącz telewizor")
+            val cleared=if(appMode==AppMode.PC)pc?.key("clear")==true else remote?.clearText()==true
+            if(!cleared)show(if(appMode==AppMode.PC)"Najpierw połącz komputer" else "Najpierw połącz telewizor")
             else {backspaceHeld=true;keyboardBuffer.clear();refreshKeyboardBuffer();show("Pole wyczyszczone")}
         }
         button.setOnTouchListener { _,event ->
             when(event.actionMasked){
                 MotionEvent.ACTION_DOWN->{
                     backspaceHeld=false
-                    if(remote==null)show("Najpierw połącz telewizor") else handler.postDelayed(clearAction,3000)
+                    if((appMode==AppMode.TV&&remote==null)||(appMode==AppMode.PC&&pc==null))show(if(appMode==AppMode.PC)"Najpierw połącz komputer" else "Najpierw połącz telewizor") else handler.postDelayed(clearAction,3000)
                     true
                 }
-                MotionEvent.ACTION_UP->{handler.removeCallbacks(clearAction);if(!backspaceHeld){remote?.backspace();deleteOneFromBuffer()};true}
+                MotionEvent.ACTION_UP->{handler.removeCallbacks(clearAction);if(!backspaceHeld){if(appMode==AppMode.PC)pc?.key("backspace")else remote?.backspace();deleteOneFromBuffer()};true}
                 MotionEvent.ACTION_CANCEL->{handler.removeCallbacks(clearAction);true}
                 else->true
             }
@@ -177,7 +206,21 @@ class MainActivity : AppCompatActivity() {
             }.onFailure { show(errorText(it)) }
         }
     }
+    private fun startPcPairing(){
+        if(address().isEmpty())return show("Wpisz adres IP komputera")
+        val pin=code.text.toString().trim();if(pin.length!=6)return show("Wpisz 6-cyfrowy kod z programu Windows")
+        busy(true);show("Parowanie z komputerem…")
+        lifecycleScope.launch {
+            val client=PcClient(address()){message->runOnUiThread{pc=null;show(message)}}
+            val result=withContext(Dispatchers.IO){client.pair(pin,android.os.Build.MODEL)}
+            busy(false);result.onSuccess { token ->
+                getSharedPreferences("pc",MODE_PRIVATE).edit().putString("host",address()).putString("token",token).apply()
+                show("Komputer sparowany. Łączenie…");connectPc()
+            }.onFailure { show("Błąd parowania PC: ${it.message}") }
+        }
+    }
     private fun connect() {
+        if(appMode==AppMode.PC)return connectPc()
         if (address().isEmpty()) return show("Wpisz adres IP telewizora")
         remote?.close(); remote = null; show("Łączenie z telewizorem…")
         lifecycleScope.launch {
@@ -197,9 +240,23 @@ class MainActivity : AppCompatActivity() {
                 .onFailure { client.close(); show(errorText(it)) }
         }
     }
-    private fun saveHost() = getSharedPreferences("tv", MODE_PRIVATE).edit().putString("host", address()).apply()
+    private fun connectPc(){
+        if(address().isEmpty())return show("Wpisz adres IP komputera")
+        val token=getSharedPreferences("pc",MODE_PRIVATE).getString("token",null)?:return show("Najpierw sparuj komputer kodem z odbiornika")
+        pc?.close();pc=null;show("Łączenie z komputerem…")
+        lifecycleScope.launch {
+            val client=PcClient(address()){message->runOnUiThread{pc=null;show(message)}}
+            val result=withContext(Dispatchers.IO){client.connect(token)}
+            result.onSuccess{pc=client;saveHost();setupPanel.visibility=View.GONE;remotePanel.visibility=View.VISIBLE;show("Połączono z komputerem — pilot jest gotowy")}
+                .onFailure{client.close();show("Błąd połączenia PC: ${it.message}")}
+        }
+    }
+    private fun saveHost() = getSharedPreferences(if(appMode==AppMode.TV)"tv" else "pc", MODE_PRIVATE).edit().putString("host", address()).apply()
     private fun key(id: Int, value: Int) = findViewById<Button>(id).setOnClickListener {
-        if (remote?.sendKey(value) != true) show("Najpierw połącz telewizor")
+        if(appMode==AppMode.PC){
+            val sent=when(value){TvKey.UP->pc?.key("up");TvKey.DOWN->pc?.key("down");TvKey.LEFT->pc?.key("left");TvKey.RIGHT->pc?.key("right");TvKey.OK->pc?.key("enter");TvKey.BACK->pc?.key("escape");TvKey.HOME->pc?.key("home");TvKey.VOL_DOWN->pc?.media("volume_down");TvKey.VOL_UP->pc?.media("volume_up");TvKey.PLAY_PAUSE->pc?.media("play_pause");TvKey.POWER->pc?.system("lock");else->false}
+            if(sent!=true)show("Najpierw połącz komputer")
+        }else if(remote?.sendKey(value)!=true)show("Najpierw połącz telewizor")
     }
     private fun busy(value: Boolean) { pairButton.isEnabled = !value; confirmButton.isEnabled = !value }
     private fun show(message: String) { status.text = message }
@@ -208,7 +265,7 @@ class MainActivity : AppCompatActivity() {
         t.message?.contains("timed out", true) == true -> "Brak odpowiedzi. Sprawdź IP i wspólną sieć Wi‑Fi."
         else -> "Błąd: ${t.message ?: "nie udało się połączyć"}"
     }
-    override fun onDestroy() { pairing?.close(); remote?.close(); super.onDestroy() }
+    override fun onDestroy() { pairing?.close(); remote?.close(); pc?.close(); super.onDestroy() }
 
     override fun onResume() {
         super.onResume()
