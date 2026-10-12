@@ -41,7 +41,7 @@ class MainActivity : AppCompatActivity() {
         code = findViewById(R.id.codeInput); pairButton = findViewById(R.id.pairButton)
         confirmButton = findViewById(R.id.confirmButton)
         setupPanel = findViewById(R.id.setupPanel); remotePanel = findViewById(R.id.remotePanel)
-        host.setText(getSharedPreferences("tv", MODE_PRIVATE).getString("host", ""))
+        host.setText(getSharedPreferences("tv", MODE_PRIVATE).getString("host", "192.168.0.100"))
         pairButton.setOnClickListener { startPairing() }
         confirmButton.setOnClickListener { finishPairing() }
         findViewById<Button>(R.id.connectButton).setOnClickListener { connect() }
@@ -52,7 +52,7 @@ class MainActivity : AppCompatActivity() {
         key(R.id.homeButton, TvKey.HOME); key(R.id.volumeDownButton, TvKey.VOL_DOWN)
         key(R.id.volumeUpButton, TvKey.VOL_UP); key(R.id.playPauseButton, TvKey.PLAY_PAUSE)
         key(R.id.powerButton, TvKey.POWER)
-        val styledButtons = intArrayOf(R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
+        val styledButtons = intArrayOf(R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.sendTextButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
         styledButtons.forEach { findViewById<Button>(it).backgroundTintList = null }
         setupKeyboard()
         setupBackspace()
@@ -89,6 +89,12 @@ class MainActivity : AppCompatActivity() {
         val shift=findViewById<Button>(R.id.shiftButton)
         shift.setOnClickListener { if(!symbolsOn){shiftOn=!shiftOn;shift.isSelected=shiftOn} }
         findViewById<Button>(R.id.spaceButton).setOnClickListener { typeOnTv(' ') }
+        findViewById<Button>(R.id.sendTextButton).setOnClickListener {
+            val text=keyboardBuffer.toString()
+            if(text.isEmpty())show("Najpierw wpisz tekst")
+            else if(remote?.sendText(text)==true)show("Wysłano tekst")
+            else show("Najpierw połącz telewizor")
+        }
         findViewById<Button>(R.id.enterButton).setOnClickListener { if(remote?.sendKey(TvKey.ENTER)!=true)show("Najpierw połącz telewizor") }
     }
     private fun rebuildKeyboard(){
