@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var lastKeyboardTapAt = 0L
     private var backspaceHeld = false
+    private var manualDisconnectRequested = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); setContentView(R.layout.activity_main)
@@ -51,9 +52,11 @@ class MainActivity : AppCompatActivity() {
         pairButton.setOnClickListener { if(appMode==AppMode.TV)startPairing() else startPcPairing() }
         confirmButton.setOnClickListener { finishPairing() }
         findViewById<Button>(R.id.connectButton).setOnClickListener { connect() }
+        findViewById<Button>(R.id.disconnectButton).setOnClickListener { disconnect() }
         findViewById<Button>(R.id.deviceModeButton).setOnClickListener { switchDeviceMode() }
         findViewById<Button>(R.id.showSetupButton).setOnClickListener {
             setupPanel.visibility=if(setupPanel.visibility==View.VISIBLE)View.GONE else View.VISIBLE
+            updateDisconnectVisibility()
         }
         key(R.id.upButton, TvKey.UP); key(R.id.downButton, TvKey.DOWN)
         key(R.id.leftButton, TvKey.LEFT); key(R.id.rightButton, TvKey.RIGHT)
@@ -62,11 +65,12 @@ class MainActivity : AppCompatActivity() {
         key(R.id.volumeUpButton, TvKey.VOL_UP); key(R.id.playPauseButton, TvKey.PLAY_PAUSE)
         key(R.id.muteButton, TvKey.MUTE);key(R.id.channelDownButton,TvKey.CHANNEL_DOWN);key(R.id.channelUpButton,TvKey.CHANNEL_UP)
         key(R.id.powerButton, TvKey.POWER)
-        val styledButtons = intArrayOf(R.id.deviceModeButton,R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.muteButton,R.id.channelDownButton,R.id.channelUpButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.textModeButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.sendTextButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
+        val styledButtons = intArrayOf(R.id.deviceModeButton,R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.disconnectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.muteButton,R.id.channelDownButton,R.id.channelUpButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.textModeButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.sendTextButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
         styledButtons.forEach { findViewById<Button>(it).backgroundTintList = null }
         setupTvNumbers()
         setupKeyboard()
         setupBackspace()
+        updateDisconnectVisibility()
         findViewById<TouchpadView>(R.id.touchpad).listener = object : TouchpadView.Listener {
             override fun move(key: Int, repeats: Int) {
                 if(appMode==AppMode.PC)return
@@ -92,7 +96,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun switchDeviceMode(){
-        saveHost();remote?.close();remote=null;pc?.close();pc=null
+        saveHost();manualDisconnectRequested=true;remote?.close();remote=null;pc?.close();pc=null
         appMode=if(appMode==AppMode.TV)AppMode.PC else AppMode.TV
         val prefs=getSharedPreferences(if(appMode==AppMode.TV)"tv" else "pc",MODE_PRIVATE)
         host.setText(prefs.getString("host",if(appMode==AppMode.TV)"192.168.0.100" else "192.168.0.2"))
@@ -108,6 +112,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.textModeButton).visibility=if(pcMode)View.GONE else View.VISIBLE
         findViewById<View>(R.id.tvNumberPanel).visibility=if(!pcMode&&findViewById<View>(R.id.keyboardPanel).visibility!=View.VISIBLE)View.VISIBLE else View.GONE
         setupPanel.visibility=View.VISIBLE
+        updateDisconnectVisibility()
         show(if(pcMode)"Uruchom Control One Receiver na komputerze, wpisz IP i kod." else "Wpisz adres IP telewizora.")
     }
 
@@ -224,6 +229,7 @@ class MainActivity : AppCompatActivity() {
             busy(false); result.onSuccess {
                 pairing = null
                 getSharedPreferences("tv", MODE_PRIVATE).edit().putBoolean("paired", true).apply()
+                updateDisconnectVisibility()
                 saveHost(); show("Sparowano. Łączenie pilota…"); connect()
             }.onFailure { show(errorText(it)) }
         }
@@ -237,11 +243,13 @@ class MainActivity : AppCompatActivity() {
             val result=withContext(Dispatchers.IO){client.pair(pin,android.os.Build.MODEL)}
             busy(false);result.onSuccess { token ->
                 getSharedPreferences("pc",MODE_PRIVATE).edit().putString("host",address()).putString("token",token).apply()
+                updateDisconnectVisibility()
                 show("Komputer sparowany. Łączenie…");connectPc()
             }.onFailure { show("Błąd parowania PC: ${it.message}") }
         }
     }
     private fun connect() {
+        manualDisconnectRequested=false
         if(appMode==AppMode.PC)return connectPc()
         if (address().isEmpty()) return show("Wpisz adres IP telewizora")
         remote?.close(); remote = null; show("Łączenie z telewizorem…")
@@ -256,22 +264,40 @@ class MainActivity : AppCompatActivity() {
             }
             val result = withContext(Dispatchers.IO) { client.connect() }
             result.onSuccess {
-                client.setTextMode(textMode);remote = client; saveHost(); setupPanel.visibility = View.GONE
-                remotePanel.visibility = View.VISIBLE; show("Połączono — pilot jest gotowy")
+                if(manualDisconnectRequested)client.close() else {
+                    client.setTextMode(textMode);remote = client; saveHost(); setupPanel.visibility = View.GONE
+                    remotePanel.visibility = View.VISIBLE; show("Połączono — pilot jest gotowy")
+                }
             }
                 .onFailure { client.close(); show(errorText(it)) }
         }
     }
     private fun connectPc(){
+        manualDisconnectRequested=false
         if(address().isEmpty())return show("Wpisz adres IP komputera")
         val token=getSharedPreferences("pc",MODE_PRIVATE).getString("token",null)?:return show("Najpierw sparuj komputer kodem z odbiornika")
         pc?.close();pc=null;show("Łączenie z komputerem…")
         lifecycleScope.launch {
             val client=PcClient(address()){message->runOnUiThread{pc=null;show(message)}}
             val result=withContext(Dispatchers.IO){client.connect(token)}
-            result.onSuccess{pc=client;saveHost();setupPanel.visibility=View.GONE;remotePanel.visibility=View.VISIBLE;show("Połączono z komputerem — pilot jest gotowy")}
+            result.onSuccess{if(manualDisconnectRequested)client.close() else {pc=client;saveHost();setupPanel.visibility=View.GONE;remotePanel.visibility=View.VISIBLE;show("Połączono z komputerem — pilot jest gotowy")}}
                 .onFailure{client.close();show("Błąd połączenia PC: ${it.message}")}
         }
+    }
+    private fun disconnect(){
+        manualDisconnectRequested=true
+        pairing?.close();pairing=null
+        remote?.close();remote=null
+        pc?.close();pc=null
+        code.visibility=View.GONE;confirmButton.visibility=View.GONE
+        setupPanel.visibility=View.VISIBLE
+        updateDisconnectVisibility()
+        show(if(appMode==AppMode.TV)"Rozłączono z telewizorem — sesja pilota została zwolniona" else "Rozłączono z komputerem")
+    }
+    private fun updateDisconnectVisibility(){
+        val paired=if(appMode==AppMode.TV)getSharedPreferences("tv",MODE_PRIVATE).getBoolean("paired",false)
+        else !getSharedPreferences("pc",MODE_PRIVATE).getString("token",null).isNullOrBlank()
+        findViewById<View>(R.id.disconnectButton).visibility=if(paired)View.VISIBLE else View.GONE
     }
     private fun saveHost() = getSharedPreferences(if(appMode==AppMode.TV)"tv" else "pc", MODE_PRIVATE).edit().putString("host", address()).apply()
     private fun key(id: Int, value: Int) = findViewById<Button>(id).setOnClickListener {
@@ -291,7 +317,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::host.isInitialized && remote == null && host.text.isNotBlank() &&
+        if (!manualDisconnectRequested && appMode==AppMode.TV && ::host.isInitialized && remote == null && host.text.isNotBlank() &&
             getSharedPreferences("tv", MODE_PRIVATE).getBoolean("paired", false)) connect()
     }
 }
