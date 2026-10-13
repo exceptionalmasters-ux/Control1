@@ -8,6 +8,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -59,9 +60,11 @@ class MainActivity : AppCompatActivity() {
         key(R.id.okButton, TvKey.OK); key(R.id.backButton, TvKey.BACK)
         key(R.id.homeButton, TvKey.HOME); key(R.id.volumeDownButton, TvKey.VOL_DOWN)
         key(R.id.volumeUpButton, TvKey.VOL_UP); key(R.id.playPauseButton, TvKey.PLAY_PAUSE)
+        key(R.id.muteButton, TvKey.MUTE);key(R.id.channelDownButton,TvKey.CHANNEL_DOWN);key(R.id.channelUpButton,TvKey.CHANNEL_UP)
         key(R.id.powerButton, TvKey.POWER)
-        val styledButtons = intArrayOf(R.id.deviceModeButton,R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.textModeButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.sendTextButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
+        val styledButtons = intArrayOf(R.id.deviceModeButton,R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.muteButton,R.id.channelDownButton,R.id.channelUpButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.textModeButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.sendTextButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
         styledButtons.forEach { findViewById<Button>(it).backgroundTintList = null }
+        setupTvNumbers()
         setupKeyboard()
         setupBackspace()
         findViewById<TouchpadView>(R.id.touchpad).listener = object : TouchpadView.Listener {
@@ -103,6 +106,7 @@ class MainActivity : AppCompatActivity() {
         confirmButton.visibility=View.GONE
         findViewById<View>(R.id.browserPanel).visibility=if(pcMode)View.GONE else View.VISIBLE
         findViewById<View>(R.id.textModeButton).visibility=if(pcMode)View.GONE else View.VISIBLE
+        findViewById<View>(R.id.tvNumberPanel).visibility=if(!pcMode&&findViewById<View>(R.id.keyboardPanel).visibility!=View.VISIBLE)View.VISIBLE else View.GONE
         setupPanel.visibility=View.VISIBLE
         show(if(pcMode)"Uruchom Control One Receiver na komputerze, wpisz IP i kod." else "Wpisz adres IP telewizora.")
     }
@@ -110,7 +114,10 @@ class MainActivity : AppCompatActivity() {
     private fun address() = host.text.toString().trim()
     private fun setupKeyboard() {
         val panel=findViewById<View>(R.id.keyboardPanel)
-        findViewById<Button>(R.id.keyboardToggleButton).setOnClickListener { panel.visibility=if(panel.visibility==View.VISIBLE)View.GONE else View.VISIBLE }
+        findViewById<Button>(R.id.keyboardToggleButton).setOnClickListener {
+            panel.visibility=if(panel.visibility==View.VISIBLE)View.GONE else View.VISIBLE
+            findViewById<View>(R.id.tvNumberPanel).visibility=if(appMode==AppMode.TV&&panel.visibility!=View.VISIBLE)View.VISIBLE else View.GONE
+        }
         val modeButton=findViewById<Button>(R.id.textModeButton)
         modeButton.setOnClickListener {
             textMode=when(textMode){TextMode.AUTO->TextMode.IME;TextMode.IME->TextMode.LEGACY;TextMode.LEGACY->TextMode.AUTO}
@@ -130,6 +137,21 @@ class MainActivity : AppCompatActivity() {
             else show(if(appMode==AppMode.PC)"Najpierw połącz komputer" else "Najpierw połącz telewizor")
         }
         findViewById<Button>(R.id.enterButton).setOnClickListener { if(appMode==AppMode.PC){if(pc?.key("enter")!=true)show("Najpierw połącz komputer")}else if(remote?.sendKey(TvKey.ENTER)!=true)show("Najpierw połącz telewizor") }
+    }
+    private fun setupTvNumbers(){
+        val grid=findViewById<GridLayout>(R.id.numberGrid)
+        val order=listOf(1,2,3,4,5,6,7,8,9,-1,0,-1)
+        order.forEach { value ->
+            if(value<0){grid.addView(View(this),GridLayout.LayoutParams().apply{width=0;height=0;columnSpec=GridLayout.spec(GridLayout.UNDEFINED,1f);rowSpec=GridLayout.spec(GridLayout.UNDEFINED,1f)})}
+            else {
+                val button=Button(this).apply{
+                    text=value.toString();textSize=15f;minWidth=0;minHeight=0;backgroundTintList=null;setBackgroundResource(R.drawable.button_outline)
+                    setTextColor(ContextCompat.getColorStateList(this@MainActivity,R.color.button_text))
+                    setOnClickListener{if(remote?.sendKey(TvKey.digit(value))!=true)show("Najpierw połącz telewizor")}
+                }
+                grid.addView(button,GridLayout.LayoutParams().apply{width=0;height=0;columnSpec=GridLayout.spec(GridLayout.UNDEFINED,1f);rowSpec=GridLayout.spec(GridLayout.UNDEFINED,1f);setMargins(2,2,2,2)})
+            }
+        }
     }
     private fun rebuildKeyboard(){
         val rows=if(symbolsOn) arrayOf("1234567890","@#\u20ac_&-+()","*/\"':;!?") else arrayOf("qwertyuiop","asdfghjkl","zxcvbnm,.")
@@ -254,7 +276,7 @@ class MainActivity : AppCompatActivity() {
     private fun saveHost() = getSharedPreferences(if(appMode==AppMode.TV)"tv" else "pc", MODE_PRIVATE).edit().putString("host", address()).apply()
     private fun key(id: Int, value: Int) = findViewById<Button>(id).setOnClickListener {
         if(appMode==AppMode.PC){
-            val sent=when(value){TvKey.UP->pc?.key("up");TvKey.DOWN->pc?.key("down");TvKey.LEFT->pc?.key("left");TvKey.RIGHT->pc?.key("right");TvKey.OK->pc?.key("enter");TvKey.BACK->pc?.key("escape");TvKey.HOME->pc?.key("home");TvKey.VOL_DOWN->pc?.media("volume_down");TvKey.VOL_UP->pc?.media("volume_up");TvKey.PLAY_PAUSE->pc?.media("play_pause");TvKey.POWER->pc?.system("lock");else->false}
+            val sent=when(value){TvKey.UP->pc?.key("up");TvKey.DOWN->pc?.key("down");TvKey.LEFT->pc?.key("left");TvKey.RIGHT->pc?.key("right");TvKey.OK->pc?.key("enter");TvKey.BACK->pc?.key("escape");TvKey.HOME->pc?.key("home");TvKey.VOL_DOWN->pc?.media("volume_down");TvKey.VOL_UP->pc?.media("volume_up");TvKey.MUTE->pc?.media("volume_mute");TvKey.PLAY_PAUSE->pc?.media("play_pause");TvKey.POWER->pc?.system("lock");else->false}
             if(sent!=true)show("Najpierw połącz komputer")
         }else if(remote?.sendKey(value)!=true)show("Najpierw połącz telewizor")
     }

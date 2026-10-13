@@ -85,7 +85,7 @@ internal static class InputController
     static void HandleKey(string n){if(n=="clear"){Send([K(0x11,0),K(0x41,0),K(0x41,KEYUP),K(0x11,KEYUP)]);Key(0x08);}else Key(Name(n));}
     static void Key(ushort v){if(v==0)return;Send([K(v,0),K(v,KEYUP)]);}
     static void Text(string s){foreach(var c in s)Send([U(c,0),U(c,KEYUP)]);}
-    static void Media(string a)=>Key(a switch{"volume_up"=>0xAF,"volume_down"=>0xAE,"play_pause"=>0xB3,_=>0});
+    static void Media(string a)=>Key(a switch{"volume_up"=>0xAF,"volume_down"=>0xAE,"volume_mute"=>0xAD,"play_pause"=>0xB3,_=>0});
     static INPUT K(ushort v,uint f)=>new(){type=INPUT_KEYBOARD,u=new(){ki=new(){vk=v,flags=f}}};
     static INPUT U(char c,uint f)=>new(){type=INPUT_KEYBOARD,u=new(){ki=new(){scan=c,flags=UNICODE|f}}};
     static void Send(INPUT[] a)=>SendInput((uint)a.Length,a,Marshal.SizeOf<INPUT>());

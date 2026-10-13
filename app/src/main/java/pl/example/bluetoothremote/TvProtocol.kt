@@ -33,7 +33,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509TrustManager
 
-object TvKey { const val HOME=3; const val BACK=4; const val UP=19; const val DOWN=20; const val LEFT=21; const val RIGHT=22; const val OK=23; const val VOL_UP=24; const val VOL_DOWN=25; const val POWER=26; const val PLAY_PAUSE=85; const val ENTER=66; const val DEL=67; const val SHIFT=59; const val CTRL=113 }
+object TvKey { const val HOME=3; const val BACK=4; const val UP=19; const val DOWN=20; const val LEFT=21; const val RIGHT=22; const val OK=23; const val VOL_UP=24; const val VOL_DOWN=25; const val POWER=26; const val PLAY_PAUSE=85; const val ENTER=66; const val DEL=67; const val SHIFT=59; const val CTRL=113; const val MUTE=164; const val CHANNEL_UP=166; const val CHANNEL_DOWN=167; fun digit(value:Int)=7+value }
 
 private sealed interface PVal { data class N(val v:Long):PVal; data class B(val v:ByteArray):PVal }
 private class PWriter {
