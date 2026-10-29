@@ -43,7 +43,10 @@ class MainActivity : AppCompatActivity() {
     private var manualDisconnectRequested = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState); setContentView(R.layout.activity_main)
+        super.onCreate(savedInstanceState)
+        DiagnosticLog.install(applicationContext)
+        DiagnosticLog.append("MainActivity.onCreate savedState=${savedInstanceState != null}")
+        setContentView(R.layout.activity_main)
         status = findViewById(R.id.statusText); host = findViewById(R.id.hostInput)
         code = findViewById(R.id.codeInput); pairButton = findViewById(R.id.pairButton)
         confirmButton = findViewById(R.id.confirmButton)
@@ -53,6 +56,10 @@ class MainActivity : AppCompatActivity() {
         confirmButton.setOnClickListener { finishPairing() }
         findViewById<Button>(R.id.connectButton).setOnClickListener { connect() }
         findViewById<Button>(R.id.disconnectButton).setOnClickListener { disconnect() }
+        findViewById<Button>(R.id.copyLogButton).setOnClickListener {
+            DiagnosticLog.copyToClipboard(this)
+            show("Log skopiowany — wklej go w rozmowie")
+        }
         findViewById<Button>(R.id.deviceModeButton).setOnClickListener { switchDeviceMode() }
         findViewById<Button>(R.id.showSetupButton).setOnClickListener {
             setupPanel.visibility=if(setupPanel.visibility==View.VISIBLE)View.GONE else View.VISIBLE
@@ -65,7 +72,7 @@ class MainActivity : AppCompatActivity() {
         key(R.id.volumeUpButton, TvKey.VOL_UP); key(R.id.playPauseButton, TvKey.PLAY_PAUSE)
         key(R.id.muteButton, TvKey.MUTE);key(R.id.channelDownButton,TvKey.CHANNEL_DOWN);key(R.id.channelUpButton,TvKey.CHANNEL_UP)
         key(R.id.powerButton, TvKey.POWER)
-        val styledButtons = intArrayOf(R.id.deviceModeButton,R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.disconnectButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.muteButton,R.id.channelDownButton,R.id.channelUpButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.textModeButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.sendTextButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
+        val styledButtons = intArrayOf(R.id.deviceModeButton,R.id.showSetupButton,R.id.pairButton,R.id.connectButton,R.id.disconnectButton,R.id.copyLogButton,R.id.confirmButton,R.id.upButton,R.id.downButton,R.id.leftButton,R.id.rightButton,R.id.okButton,R.id.backButton,R.id.homeButton,R.id.volumeDownButton,R.id.volumeUpButton,R.id.playPauseButton,R.id.muteButton,R.id.channelDownButton,R.id.channelUpButton,R.id.powerButton,R.id.keyboardToggleButton,R.id.textModeButton,R.id.symbolsButton,R.id.shiftButton,R.id.spaceButton,R.id.sendTextButton,R.id.enterButton,R.id.backspaceButton,R.id.openUrlButton,R.id.searchWebButton)
         styledButtons.forEach { findViewById<Button>(it).backgroundTintList = null }
         setupTvNumbers()
         setupKeyboard()
@@ -177,7 +184,10 @@ class MainActivity : AppCompatActivity() {
     private fun matchParentHeight()=LinearLayout.LayoutParams.MATCH_PARENT
     private fun typeCharacter(char:Char){
         if (!acceptKeyboardTap()) return
+        val kind=when{char.isLetter()->"letter";char.isDigit()->"digit";else->"symbol"}
+        DiagnosticLog.append("UI typeCharacter kind=$kind mode=$appMode textMode=$textMode")
         val sent=if(appMode==AppMode.PC)pc?.text(char.toString())==true else remote?.sendText(char.toString())==true
+        DiagnosticLog.append("UI typeCharacter result=$sent")
         if(!sent) show(if(appMode==AppMode.PC)"Najpierw połącz komputer" else "Najpierw połącz telewizor")
         else { keyboardBuffer.append(char);refreshKeyboardBuffer() }
     }
@@ -252,24 +262,28 @@ class MainActivity : AppCompatActivity() {
         manualDisconnectRequested=false
         if(appMode==AppMode.PC)return connectPc()
         if (address().isEmpty()) return show("Wpisz adres IP telewizora")
+        DiagnosticLog.append("TV connect requested host=${address()}")
         remote?.close(); remote = null; show("Łączenie z telewizorem…")
         lifecycleScope.launch {
             val client = TvRemote(this@MainActivity, address(), imeEvent={ imeState ->
+                DiagnosticLog.append("UI IME event app=${imeState.appPackage} label=${imeState.label.take(40)} cursor=${imeState.cursorStart}..${imeState.cursorEnd} valueLength=${imeState.value.length}")
                 runOnUiThread {
                     val source=imeState.label.ifBlank { imeState.appPackage.substringAfterLast('.').ifBlank { "pole tekstowe TV" } }
                     show("Klawiatura TV aktywna: $source")
                 }
             }) {
+                DiagnosticLog.append("TV event: $it")
                 runOnUiThread { remote = null; show("$it — po powrocie połączę ponownie") }
             }
             val result = withContext(Dispatchers.IO) { client.connect() }
             result.onSuccess {
                 if(manualDisconnectRequested)client.close() else {
+                    DiagnosticLog.append("TV connect success")
                     client.setTextMode(textMode);remote = client; saveHost(); setupPanel.visibility = View.GONE
                     remotePanel.visibility = View.VISIBLE; show("Połączono — pilot jest gotowy")
                 }
             }
-                .onFailure { client.close(); show(errorText(it)) }
+                .onFailure { DiagnosticLog.append("TV connect failure: ${it.stackTraceToString()}");client.close(); show(errorText(it)) }
         }
     }
     private fun connectPc(){
@@ -313,10 +327,22 @@ class MainActivity : AppCompatActivity() {
         t.message?.contains("timed out", true) == true -> "Brak odpowiedzi. Sprawdź IP i wspólną sieć Wi‑Fi."
         else -> "Błąd: ${t.message ?: "nie udało się połączyć"}"
     }
-    override fun onDestroy() { pairing?.close(); remote?.close(); pc?.close(); super.onDestroy() }
+    override fun onPause() {
+        DiagnosticLog.append("MainActivity.onPause finishing=$isFinishing changing=$isChangingConfigurations")
+        super.onPause()
+    }
+    override fun onStop() {
+        DiagnosticLog.append("MainActivity.onStop finishing=$isFinishing changing=$isChangingConfigurations")
+        super.onStop()
+    }
+    override fun onDestroy() {
+        DiagnosticLog.append("MainActivity.onDestroy finishing=$isFinishing changing=$isChangingConfigurations")
+        pairing?.close(); remote?.close(); pc?.close(); super.onDestroy()
+    }
 
     override fun onResume() {
         super.onResume()
+        DiagnosticLog.append("MainActivity.onResume manualDisconnect=$manualDisconnectRequested remote=${remote != null}")
         if (!manualDisconnectRequested && appMode==AppMode.TV && ::host.isInitialized && remote == null && host.text.isNotBlank() &&
             getSharedPreferences("tv", MODE_PRIVATE).getBoolean("paired", false)) connect()
     }

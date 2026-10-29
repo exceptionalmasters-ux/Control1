@@ -95,20 +95,34 @@ enum class TextMode { AUTO, IME, LEGACY }
 
 class TvRemote(context:Context,private val host:String,private val imeEvent:(ImeState)->Unit={},private val event:(String)->Unit):Closeable{
     private val id=IdentityStore.get(context);private var connection:SecureConnection?=null;private var output:OutputStream?=null;private var scope:CoroutineScope?=null;private val writer=Executors.newSingleThreadExecutor();@Volatile private var ready=false;@Volatile private var batchIme=0;@Volatile private var batchField=0;@Volatile private var appIme=0;@Volatile private var statusField=0;@Volatile private var imeFieldActive=false;@Volatile private var imeValue="";@Volatile private var appPackage="";@Volatile private var textMode=TextMode.AUTO;private var features=0
-    fun connect(): Result<Unit> = runCatching{val c=tls(host,6466,id,10000);connection=c;output=c.socket.outputStream;val input=c.socket.inputStream;while(!ready)handle(parse(input.frame()));c.socket.soTimeout=0;scope=CoroutineScope(SupervisorJob()+Dispatchers.IO).also{it.launch{runCatching{while(true)handle(parse(input.frame()))}.onFailure{if(ready){ready=false;event("Utracono połączenie z TV")}}}}}.onFailure{close()}
-    private fun handle(m:Map<Int,List<PVal>>){when{
+    fun connect(): Result<Unit> = runCatching{
+        DiagnosticLog.append("TvRemote.connect TLS start host=$host")
+        val c=tls(host,6466,id,10000);connection=c;output=c.socket.outputStream;val input=c.socket.inputStream
+        while(!ready)handle(parse(input.frame()))
+        DiagnosticLog.append("TvRemote.connect ready features=$features")
+        c.socket.soTimeout=0
+        scope=CoroutineScope(SupervisorJob()+Dispatchers.IO).also{it.launch{
+            runCatching{while(true)handle(parse(input.frame()))}.onFailure{
+                DiagnosticLog.append("TvRemote.reader failure ready=$ready: ${it.stackTraceToString()}")
+                if(ready){ready=false;event("Utracono połączenie z TV")}
+            }
+        }}
+    }.onFailure{DiagnosticLog.append("TvRemote.connect failure: ${it.stackTraceToString()}");close()}
+    private fun handle(m:Map<Int,List<PVal>>){
+        DiagnosticLog.append("TvRemote.receive fields=${m.keys.sorted()}")
+        when{
         m.has(1)->{features=(m.msg(1)?.num(1)?.toInt()?:0) and 615;send{message(1){number(1,features);message(2){string(1,android.os.Build.MODEL);string(2,android.os.Build.MANUFACTURER);number(3,1);string(4,"1");string(5,"pl.example.bluetoothremote");string(6,"0.13")}}}}
         m.has(2)->send{message(2){number(1,features)}}
         m.has(8)->send{message(9){number(1,m.msg(8)?.num(1)?:0)}}
         m.has(20)->{
             val message=m.msg(20);val app=message?.msg(1);val status=message?.msg(2)
             app?.num(1)?.toInt()?.let{appIme=it};app?.str(12)?.takeIf{it.isNotEmpty()}?.let{appPackage=it}
-            if(status!=null){status.num(1)?.toInt()?.let{statusField=it};publishIme(appPackage,status)}
-            else imeFieldActive=false
+            if(status!=null){status.num(1)?.toInt()?.let{statusField=it};DiagnosticLog.append("IME appStatus active app=$appPackage appIme=$appIme field=$statusField");publishIme(appPackage,status)}
+            else {imeFieldActive=false;DiagnosticLog.append("IME appStatus inactive app=$appPackage appIme=$appIme")}
         }
-        m.has(21)->{val edit=m.msg(21);edit?.num(1)?.toInt()?.let{batchIme=it};edit?.num(2)?.toInt()?.let{batchField=it}}
-        m.has(22)->{val status=m.msg(22)?.msg(2);status?.num(1)?.toInt()?.let{statusField=it};publishIme(appPackage,status)}
-        m.has(40)->ready=true
+        m.has(21)->{val edit=m.msg(21);edit?.num(1)?.toInt()?.let{batchIme=it};edit?.num(2)?.toInt()?.let{batchField=it};DiagnosticLog.append("IME batch counters ime=$batchIme field=$batchField")}
+        m.has(22)->{val status=m.msg(22)?.msg(2);status?.num(1)?.toInt()?.let{statusField=it};DiagnosticLog.append("IME status update present=${status != null} field=$statusField");publishIme(appPackage,status)}
+        m.has(40)->{ready=true;DiagnosticLog.append("TvRemote handshake ready")}
     }}
     private fun publishIme(app:String,status:Map<Int,List<PVal>>?){
         imeFieldActive=status!=null;imeValue=status?.str(2).orEmpty()
@@ -118,13 +132,16 @@ class TvRemote(context:Context,private val host:String,private val imeEvent:(Ime
     fun sendKey(key:Int, direction:Int = 3):Boolean{if(!ready)return false;send{message(10){number(1,key);number(2,direction)}};return true}
     fun sendText(text:String):Boolean{
         if(!ready||text.isEmpty())return false
-        val caret=(text.length-1).coerceAtLeast(0);sendImeEdit(caret,caret,text,useImeMode())
+        val caret=(text.length-1).coerceAtLeast(0)
+        DiagnosticLog.append("TvRemote.sendText length=${text.length} caret=$caret imeMode=${useImeMode()} active=$imeFieldActive app=$appPackage appIme=$appIme statusField=$statusField batchIme=$batchIme batchField=$batchField")
+        sendImeEdit(caret,caret,text,useImeMode())
         return true
     }
     fun setTextMode(mode:TextMode){textMode=mode}
     private fun useImeMode()=when(textMode){TextMode.IME->true;TextMode.LEGACY->false;TextMode.AUTO->!appPackage.contains("youtube",true)&&imeFieldActive}
     private fun sendImeEdit(start:Int,end:Int,text:String,imeMode:Boolean){
         val imeCounter=if(imeMode)appIme else batchIme;val fieldCounter=if(imeMode)statusField else batchField
+        DiagnosticLog.append("TvRemote.sendImeEdit imeMode=$imeMode ime=$imeCounter field=$fieldCounter range=$start..$end length=${text.length}")
         send{message(21){number(1,imeCounter);number(2,fieldCounter);message(3){number(1,1);message(2){number(1,start);number(2,end);string(3,text)}}}}
     }
     fun sendTextAsKeys(text:String):Int {
@@ -165,6 +182,17 @@ class TvRemote(context:Context,private val host:String,private val imeEvent:(Ime
         send{message(90){string(1,url)}}
         return true
     }
-    private fun send(build:PWriter.()->Unit){val data=PWriter().apply(build).data();val stream=output?:return;runCatching{writer.execute{runCatching{stream.frame(data)}.onFailure{ready=false;event("Błąd wysyłania do TV")}}}}
-    override fun close(){ready=false;scope?.cancel();scope=null;runCatching{connection?.socket?.close()};connection=null;output=null;writer.shutdownNow()}
+    private fun send(build:PWriter.()->Unit){
+        val data=PWriter().apply(build).data();val stream=output?:return
+        runCatching{writer.execute{
+            runCatching{stream.frame(data)}.onFailure{
+                DiagnosticLog.append("TvRemote.send failure: ${it.stackTraceToString()}")
+                ready=false;event("Błąd wysyłania do TV")
+            }
+        }}.onFailure{DiagnosticLog.append("TvRemote.writer rejected: ${it.stackTraceToString()}")}
+    }
+    override fun close(){
+        DiagnosticLog.append("TvRemote.close ready=$ready")
+        ready=false;scope?.cancel();scope=null;runCatching{connection?.socket?.close()};connection=null;output=null;writer.shutdownNow()
+    }
 }
